@@ -425,6 +425,7 @@
     isRecording: false,
     isPaused: false,
     retryCount: 0,
+    wrongAnswers: [],
     currentQuestion: null,
     currentAnswer: '',
     conversationHistory: [],
@@ -1291,19 +1292,30 @@
         const elCenter = elRect.left + (elRect.width * 0.5);
 
         const isRightAligned = chatRect ? (elCenter > chatMidX) : false;
-        const hasUserClass = el.classList.contains('message-user') ||
-                             el.classList.contains('chat-message--user') ||
-                             el.classList.contains('chat-message-right') ||
-                             el.classList.contains('right') ||
-                             !!el.querySelector('.message-user, [class*="user"]');
-        const hasAssistantClass = el.classList.contains('message-assistant') ||
-                                  el.classList.contains('chat-message--assistant') ||
-                                  !!el.querySelector('.message-assistant, [class*="assistant"]');
+        const elText = el.textContent || '';
+        const hasUserIndicator = el.classList.contains('message-user') ||
+                                 el.classList.contains('chat-message--user') ||
+                                 el.classList.contains('chat-message-right') ||
+                                 el.classList.contains('right') ||
+                                 /🧑🎓|Học\s*sinh|\bstudent\b/i.test(elText) ||
+                                 !!el.querySelector('.message-user, [class*="user"], .ant-avatar-image');
+        const hasAssistantIndicator = el.classList.contains('message-assistant') ||
+                                      el.classList.contains('chat-message--assistant') ||
+                                      /🤖|Chatbot|Trợ\s*lý/i.test(elText) ||
+                                      !!el.querySelector('.message-assistant, [class*="assistant"]');
 
         let isUser = false;
-        if (hasUserClass) isUser = true;
-        else if (hasAssistantClass) isUser = false;
+        if (hasUserIndicator && !hasAssistantIndicator) isUser = true;
+        else if (hasAssistantIndicator && !hasUserIndicator) isUser = false;
+        else if (hasUserIndicator) isUser = true;
+        else if (hasAssistantIndicator) isUser = false;
         else if (isRightAligned) isUser = true;
+
+        if (!isUser && /^\s*Trả\s*lời\s*:/i.test(elText.trim())) {
+          if (!/câu\s*hỏi|gợi\s*ý|tuy\s*nhiên|chính\s*xác|thử\s*lại/i.test(elText)) {
+            isUser = true;
+          }
+        }
 
         let rawContent = '';
         try {
@@ -1600,8 +1612,10 @@
           const fp = candidate.feedback.result + '_' + qText.substring(0, 60);
           if (STATE.fsmState === FSM_STATE.EVALUATING || STATE.lastFeedbackFingerprint !== fp) {
             STATE.lastFeedbackFingerprint = fp;
+            STATE.activeQuestionCandidate = candidate;
             log('VERIFY', `📊 Nhận kết quả đánh giá: ${candidate.feedback.result} - "${qText.substring(0, 60)}..."`);
             fsmController.handleFeedback(candidate.feedback.result, qText);
+            return;
           }
           log('DETECT', '💡 Phát hiện câu hỏi bài tập tiếp theo đi kèm nhận xét!');
         }
@@ -1611,10 +1625,15 @@
           STATE.evaluationTimer = null;
         }
 
+        if (STATE.lastAnsweredQuestionText && qText !== STATE.lastAnsweredQuestionText) {
+          STATE.wrongAnswers = [];
+        }
+
         log('DETECT', `🎯 PHÁT HIỆN CÂU HỎI MỚI [Nguồn: ${candidate.source}]: "${qText.substring(0, 70)}..."`);
         STATE.activeQuestionCandidate = candidate;
         if (STATE.autoSolve && (STATE.fsmState === FSM_STATE.IDLE || STATE.fsmState === FSM_STATE.EVALUATING)) {
           STATE.retryCount = 0;
+          STATE.wrongAnswers = [];
           STATE.currentQuestionTurnElement = qEl;
           fsmController.transition(FSM_STATE.EXTRACTION);
         }
@@ -1693,7 +1712,19 @@
         const styles = clone.querySelectorAll('style, script, svg, noscript');
         for (const s of styles) s.remove();
 
-        const qBlock = clone.querySelector(CONFIG.SELECTORS.EXERCISE_BLOCK) || clone;
+        const isChatMessage = botElement.classList && (
+          botElement.classList.contains('chat-message') ||
+          botElement.classList.contains('message-container') ||
+          botElement.classList.contains('ant-comment') ||
+          !!botElement.closest(CONFIG.SELECTORS.CHAT_BODY || '.chat-body')
+        );
+
+        let qBlock = clone;
+        if (!isChatMessage) {
+          const innerBlock = clone.querySelector(CONFIG.SELECTORS.EXERCISE_BLOCK);
+          if (innerBlock) qBlock = innerBlock;
+        }
+
         const imgs = qBlock.querySelectorAll('img');
         const altHints = [];
         for (const im of imgs) {
@@ -2325,14 +2356,25 @@ CÁC QUY TẮC SỐNG CÒN BẮT BUỘC TUÂN THỦ:
         sys += `\n\nTHÔNG TIN BỔ SUNG / DỮ KIỆN PHỤ TRỢ Ở PHÍA DƯỚI KHUNG CHAT:\n${cleanBtm}`;
       }
 
-      const isRetrying = STATE.retryCount > 0 || (STATE.conversationHistory.length > 0 && (STATE.conversationHistory[STATE.conversationHistory.length - 1].question || '').substring(0, 50) === (qd.text || '').substring(0, 50));
+      const isRetrying = STATE.retryCount > 0 || (STATE.conversationHistory.length > 0 && (STATE.conversationHistory[STATE.conversationHistory.length - 1].question || '').substring(0, 50) === (qd.text || '').substring(0, 50)) || (STATE.wrongAnswers && STATE.wrongAnswers.length > 0);
 
       if (isRetrying) {
-        const lastEntry = STATE.conversationHistory[STATE.conversationHistory.length - 1];
-        const lastAns = lastEntry ? lastEntry.answer : '';
-        sys += `\n\n⚠️ CẢNH BÁO ĐANG SỬA BÀI / GIẢI LẠI:
-Đáp án trước đó (${lastAns ? `"${lastAns.substring(0, 120)}..."` : 'lần thử trước'}) chưa đạt yêu cầu hoặc BỊ THIẾU Ý (ví dụ mới nêu được 1 ý trong khi đề yêu cầu 3 ý).
-👉 BẮT BUỘC: Bạn phải mở rộng câu trả lời, bổ sung đầy đủ các ý/bước/kỹ thuật còn thiếu theo gợi ý của giáo viên. TUYỆT ĐỐI KHÔNG lặp lại y nguyên đáp án cũ!`;
+        const wrongList = (STATE.wrongAnswers && STATE.wrongAnswers.length > 0)
+          ? STATE.wrongAnswers
+          : [(STATE.conversationHistory[STATE.conversationHistory.length - 1]?.answer || '').replace(/^Trả\s*lời\s*:\s*/i, '').trim()].filter(Boolean);
+
+        sys += `\n\n🚨 CẢNH BÁO ĐẶC BIỆT - ĐANG SỬA BÀI / THỬ LẠI LẦN ${STATE.retryCount || 1}:`;
+        if (wrongList.length > 0) {
+          sys += `\n⛔ CÁC ĐÁP ÁN ĐÃ THỬ VÀ BỊ HỆ THỐNG BÁO SAI (TUYỆT ĐỐI CẤM LẶP LẠI DƯỚI MỌI HÌNH THỨC):`;
+          for (const w of wrongList) {
+            sys += `\n   ❌ "${w}" (ĐÃ SAI HOÀN TOÀN - CẤM ĐƯA RA LẠI!)`;
+          }
+        }
+        sys += `\n👉 BẮT BUỘC: Bạn phải đưa ra một đáp án HOÀN TOÀN MỚI, KHÁC BIỆT với các đáp án sai ở trên.
+👉 HÃY ĐỌC KỸ VÀ KHAI THÁC TRIỆT ĐỂ TOÀN BỘ PHẦN "GỢI Ý" (HINTS) VÀ "PHẢN HỒI" CỦA HỆ THỐNG TRONG ĐỀ BÀI:
+- Phân tích chính xác từng từ khóa gợi ý (ví dụ: gợi ý về cơ chế "hòa trộn" giữa các tính trạng của bố mẹ giống như hai màu mực, từ khóa trong ngoặc vuông, v.v.).
+- Dựa trực tiếp vào các gợi ý đó để xác định ngay học thuyết / đáp án chính xác mà hệ thống đang hướng tới.
+- Tuyệt đối không chọn lại đáp án cũ! Nếu câu hỏi yêu cầu nhiều ý, phải liệt kê đầy đủ từng ý (1., 2., 3.).`;
       } else if (STATE.conversationHistory.length > 0) {
         const recent = STATE.conversationHistory.slice(-2);
         sys += '\n\nLỊCH SỬ CÂU HỎI VỪA HOÀN THÀNH:';
@@ -3285,6 +3327,7 @@ Xác định rõ ràng: Đúng hoặc Sai, kèm theo 1 câu giải thích ngắn
         STATE.questionsSolved++;
         STATE.questionsCorrect++;
         STATE.retryCount = 0;
+        STATE.wrongAnswers = [];
         updateStats();
         this.transition(FSM_STATE.IDLE);
         setTimeout(() => domScraper.checkForNewContent(), 400);
@@ -3297,12 +3340,19 @@ Xác định rõ ràng: Đúng hoặc Sai, kèm theo 1 câu giải thích ngắn
           delete STATE.currentQuestionTurnElement.dataset.edunextAnswered;
         }
 
+        if (!STATE.wrongAnswers) STATE.wrongAnswers = [];
+        const lastAns = STATE.currentAnswer || (STATE.conversationHistory.length > 0 ? STATE.conversationHistory[STATE.conversationHistory.length - 1].answer : '');
+        const cleanAns = (lastAns || '').replace(/^Trả\s*lời\s*:\s*/i, '').trim();
+        if (cleanAns && !STATE.wrongAnswers.includes(cleanAns)) {
+          STATE.wrongAnswers.push(cleanAns);
+          log('VERIFY', `🚫 Ghi nhớ đáp án sai để CẤM lặp lại: "${cleanAns}"`);
+        }
+
         if (STATE.retryCount >= CONFIG.MAX_RETRIES) {
           this.handleMaxRetries();
         } else {
-          STATE.currentQuestion.text += `\n\n[HỆ THỐNG BÁO SAI]: ${feedbackText.substring(0, 300)}`;
-          log('VERIFY', `🔄 Self-Healing: Tự chữa lành & giải lại (${STATE.retryCount}/${CONFIG.MAX_RETRIES})...`);
-          this.transition(FSM_STATE.SOLVING);
+          log('VERIFY', `🔄 Self-Healing: Bóc tách lại Gợi ý & Phản hồi mới từ Bot để giải lại (${STATE.retryCount}/${CONFIG.MAX_RETRIES})...`);
+          this.transition(FSM_STATE.EXTRACTION);
         }
       }
     },
