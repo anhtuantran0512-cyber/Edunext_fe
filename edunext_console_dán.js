@@ -1,11 +1,131 @@
-(() => {
+/* EdUnExT Solver Console Edition - Universal Standalone */
+(function __BROAMSTUCK_CORE__() {
   'use strict';
-  if (typeof document !== 'undefined') {
-    const _prevRoot = document.getElementById('edunext-glass-engine-root');
-    if (_prevRoot) {
-      try { _prevRoot.remove(); } catch (_) {}
+
+  const IS_EDUNEXT = /edunext\.fpt\.edu\.vn/.test(location.hostname);
+  const IS_GEMINI_WEB = /gemini\.google\.com/.test(location.hostname);
+
+  const WorkerTimer = (() => {
+    let worker = null;
+    let nextId = 1;
+    const callbacks = new Map();
+    try {
+      if (typeof Worker !== 'undefined' && typeof Blob !== 'undefined' && typeof URL !== 'undefined' && typeof URL.createObjectURL === 'function') {
+        const workerCode = `
+          let timers = {};
+          self.onmessage = function(e) {
+            const { id, action, ms } = e.data;
+            if (action === 'setInterval') {
+              timers[id] = setInterval(() => self.postMessage({ id }), ms);
+            } else if (action === 'clearInterval') {
+              clearInterval(timers[id]);
+              delete timers[id];
+            } else if (action === 'setTimeout') {
+              timers[id] = setTimeout(() => {
+                self.postMessage({ id });
+                delete timers[id];
+              }, ms);
+            } else if (action === 'clearTimeout') {
+              clearTimeout(timers[id]);
+              delete timers[id];
+            }
+          };
+        `;
+        const blob = new Blob([workerCode], { type: 'application/javascript' });
+        worker = new Worker(URL.createObjectURL(blob));
+        worker.onmessage = (e) => {
+          const cb = callbacks.get(e.data.id);
+          if (cb) cb();
+        };
+      }
+    } catch (_) {
+      worker = null;
     }
+
+    return {
+      setTimeout(fn, ms = 0) {
+        if (!worker) return (typeof window !== "undefined" && typeof window.setTimeout === "function" ? window.setTimeout(fn, ms) : setTimeout(fn, ms));
+        const id = nextId++;
+        callbacks.set(id, () => {
+          callbacks.delete(id);
+          try { fn(); } catch (err) { console.error('[WorkerTimer] Lỗi callback:', err); }
+        });
+        worker.postMessage({ id, action: 'setTimeout', ms: Math.max(0, ms) });
+        return id;
+      },
+      clearTimeout(id) {
+        if (!worker) return (typeof window !== "undefined" && typeof window.clearTimeout === "function" ? window.clearTimeout(id) : clearTimeout(id));
+        callbacks.delete(id);
+        worker.postMessage({ id, action: 'clearTimeout' });
+      },
+      setInterval(fn, ms = 0) {
+        if (!worker) return (typeof window !== "undefined" && typeof window.setInterval === "function" ? window.setInterval(fn, ms) : setInterval(fn, ms));
+        const id = nextId++;
+        callbacks.set(id, () => {
+          try { fn(); } catch (err) { console.error('[WorkerTimer] Lỗi callback interval:', err); }
+        });
+        worker.postMessage({ id, action: 'setInterval', ms: Math.max(0, ms) });
+        return id;
+      },
+      clearInterval(id) {
+        if (!worker) return (typeof window !== "undefined" && typeof window.clearInterval === "function" ? window.clearInterval(id) : clearInterval(id));
+        callbacks.delete(id);
+        worker.postMessage({ id, action: 'clearInterval' });
+      },
+      sleep(ms) {
+        return new Promise(resolve => this.setTimeout(resolve, ms));
+      }
+    };
+  })();
+
+  function initBackgroundKeepAlive(isGemini = false) {
+    try {
+      let audioContext = null;
+      const startAudio = () => {
+        if (audioContext && audioContext.state === 'running') return;
+        try {
+          const AudioCtx = window.AudioContext || window.webkitAudioContext;
+          if (AudioCtx) {
+            audioContext = new AudioCtx();
+            const osc = audioContext.createOscillator();
+            const gain = audioContext.createGain();
+            gain.gain.value = 0.00001;
+            osc.frequency.value = 440;
+            osc.connect(gain);
+            gain.connect(audioContext.destination);
+            osc.start();
+            if (audioContext.state === 'suspended') {
+              audioContext.resume().catch(() => {});
+            }
+          }
+        } catch (_) {}
+      };
+
+      ['click', 'keydown', 'mousemove', 'scroll', 'touchstart'].forEach(evt => {
+        window.addEventListener(evt, startAudio, { once: true, capture: true });
+      });
+      startAudio();
+
+      if (isGemini) {
+        try {
+          Object.defineProperty(document, 'hidden', { get: () => false, configurable: true });
+          Object.defineProperty(document, 'visibilityState', { get: () => 'visible', configurable: true });
+          Object.defineProperty(document, 'webkitHidden', { get: () => false, configurable: true });
+          Object.defineProperty(document, 'webkitVisibilityState', { get: () => 'visible', configurable: true });
+          if (document.hasFocus) {
+            Object.defineProperty(document, 'hasFocus', { value: () => true, configurable: true });
+          }
+        } catch (_) {}
+
+        window.addEventListener('visibilitychange', (e) => {
+          e.stopImmediatePropagation();
+        }, true);
+      }
+    } catch (_) {}
   }
+
+  if (!IS_EDUNEXT && !IS_GEMINI_WEB) return;
+
   if (typeof window !== 'undefined' && typeof window.unsafeWindow === 'undefined') {
     window.unsafeWindow = window;
   }
@@ -194,140 +314,13 @@
     };
   }
 
-(function __BROAMSTUCK_CORE__() {
-  'use strict';
-
-  const IS_EDUNEXT = /edunext\.fpt\.edu\.vn/.test(location.hostname);
-  const IS_GEMINI_WEB = /gemini\.google\.com/.test(location.hostname);
-
-  const WorkerTimer = (() => {
-    let worker = null;
-    let nextId = 1;
-    const callbacks = new Map();
-    try {
-      if (typeof Worker !== 'undefined' && typeof Blob !== 'undefined' && typeof URL !== 'undefined' && typeof URL.createObjectURL === 'function') {
-        const workerCode = `
-          let timers = {};
-          self.onmessage = function(e) {
-            const { id, action, ms } = e.data;
-            if (action === 'setInterval') {
-              timers[id] = setInterval(() => self.postMessage({ id }), ms);
-            } else if (action === 'clearInterval') {
-              clearInterval(timers[id]);
-              delete timers[id];
-            } else if (action === 'setTimeout') {
-              timers[id] = setTimeout(() => {
-                self.postMessage({ id });
-                delete timers[id];
-              }, ms);
-            } else if (action === 'clearTimeout') {
-              clearTimeout(timers[id]);
-              delete timers[id];
-            }
-          };
-        `;
-        const blob = new Blob([workerCode], { type: 'application/javascript' });
-        worker = new Worker(URL.createObjectURL(blob));
-        worker.onmessage = (e) => {
-          const cb = callbacks.get(e.data.id);
-          if (cb) cb();
-        };
-      }
-    } catch (_) {
-      worker = null;
-    }
-
-    return {
-      setTimeout(fn, ms = 0) {
-        if (!worker) return (typeof window !== "undefined" && typeof window.setTimeout === "function" ? window.setTimeout(fn, ms) : setTimeout(fn, ms));
-        const id = nextId++;
-        callbacks.set(id, () => {
-          callbacks.delete(id);
-          try { fn(); } catch (err) { console.error('[WorkerTimer] Lỗi callback:', err); }
-        });
-        worker.postMessage({ id, action: 'setTimeout', ms: Math.max(0, ms) });
-        return id;
-      },
-      clearTimeout(id) {
-        if (!worker) return (typeof window !== "undefined" && typeof window.clearTimeout === "function" ? window.clearTimeout(id) : clearTimeout(id));
-        callbacks.delete(id);
-        worker.postMessage({ id, action: 'clearTimeout' });
-      },
-      setInterval(fn, ms = 0) {
-        if (!worker) return (typeof window !== "undefined" && typeof window.setInterval === "function" ? window.setInterval(fn, ms) : setInterval(fn, ms));
-        const id = nextId++;
-        callbacks.set(id, () => {
-          try { fn(); } catch (err) { console.error('[WorkerTimer] Lỗi callback interval:', err); }
-        });
-        worker.postMessage({ id, action: 'setInterval', ms: Math.max(0, ms) });
-        return id;
-      },
-      clearInterval(id) {
-        if (!worker) return (typeof window !== "undefined" && typeof window.clearInterval === "function" ? window.clearInterval(id) : clearInterval(id));
-        callbacks.delete(id);
-        worker.postMessage({ id, action: 'clearInterval' });
-      },
-      sleep(ms) {
-        return new Promise(resolve => this.setTimeout(resolve, ms));
-      }
-    };
-  })();
-
-  function initBackgroundKeepAlive(isGemini = false) {
-    try {
-      let audioContext = null;
-      const startAudio = () => {
-        if (audioContext && audioContext.state === 'running') return;
-        try {
-          const AudioCtx = window.AudioContext || window.webkitAudioContext;
-          if (AudioCtx) {
-            audioContext = new AudioCtx();
-            const osc = audioContext.createOscillator();
-            const gain = audioContext.createGain();
-            gain.gain.value = 0.00001;
-            osc.frequency.value = 440;
-            osc.connect(gain);
-            gain.connect(audioContext.destination);
-            osc.start();
-            if (audioContext.state === 'suspended') {
-              audioContext.resume().catch(() => {});
-            }
-          }
-        } catch (_) {}
-      };
-
-      ['click', 'keydown', 'mousemove', 'scroll', 'touchstart'].forEach(evt => {
-        window.addEventListener(evt, startAudio, { once: true, capture: true });
-      });
-      startAudio();
-
-      if (isGemini) {
-        try {
-          Object.defineProperty(document, 'hidden', { get: () => false, configurable: true });
-          Object.defineProperty(document, 'visibilityState', { get: () => 'visible', configurable: true });
-          Object.defineProperty(document, 'webkitHidden', { get: () => false, configurable: true });
-          Object.defineProperty(document, 'webkitVisibilityState', { get: () => 'visible', configurable: true });
-          if (document.hasFocus) {
-            Object.defineProperty(document, 'hasFocus', { value: () => true, configurable: true });
-          }
-        } catch (_) {}
-
-        window.addEventListener('visibilitychange', (e) => {
-          e.stopImmediatePropagation();
-        }, true);
-      }
-    } catch (_) {}
-  }
-
-  if (!IS_EDUNEXT && !IS_GEMINI_WEB) return;
-
   const CONFIG = {
     SESSION_ID: crypto.randomUUID ? crypto.randomUUID() : 'S-' + Date.now() + '-' + Math.random().toString(36).slice(2, 10),
     DB_NAME: 'EduNextForensicDB',
     DB_STORE: 'telemetry_events',
     DB_VERSION: 1,
     MAX_RETRIES: 10,
-    API_TIMEOUT_MS: 28000,
+    API_TIMEOUT_MS: 16000,
     BOT_DEBOUNCE_MS: 1500,
     HEARTBEAT_INTERVAL_MS: 800,
     FACEBOOK_URL: 'https://www.facebook.com/TuanNotTun/',
@@ -338,8 +331,8 @@
     AUTHOR: 'BroAmStuck',
     INTEGRITY_CHECKSUM: '7832f3f2891fd085',
     AUTH_SIG: 'QlJPQU1TVFVDS19PWF9TVFVESU9fMjAyNg==',
-    FALLBACK_MODELS: ['gemini-3.6-flash', 'gemini-3.6-pro', 'gemini-3.5-flash', 'gemini-3.5-flash-lite', 'gemini-3.5-pro', 'gemini-3.1-flash', 'gemini-3.1-flash-lite', 'gemini-3.1-flash-8b', 'gemini-3.1-pro'],
-    DEFAULT_MODEL: 'gemini-3.6-flash',
+    FALLBACK_MODELS: ['gemini-3.8-flash', 'gemini-3.8-pro', 'gemini-3.5-flash', 'gemini-3.0-flash'],
+    DEFAULT_MODEL: 'gemini-3.8-flash',
     GEMINI_ENDPOINT: 'https://generativelanguage.googleapis.com/v1beta/models',
     SELECTORS: {
       WIDGET_CONTAINER: '#chat-widget-container',
@@ -349,7 +342,7 @@
       MESSAGE_CONTAINER: '.message-container, .chat-message, [class*="message-container"], [class*="chat-message"], .msg-row, [class*="chat-bubble"], .ant-comment',
       MESSAGE_ASSISTANT: '.message-container.message-assistant, .message-assistant, .chat-message--assistant, [class*="assistant"], .chat-message-left',
       MESSAGE_USER: '.message-container.message-user, .message-user, .chat-message--user, [class*="user"], .chat-message-right',
-      EXERCISE_BLOCK: '.exercise-question-block, [data-testid*="exercise"], [data-testid*="question"], .question-card, .question-content, .question-detail, .exercise-card, .w-exercise, [class*="exercise-question"], [class*="QuestionDetail"], [class*="roundtable"], [class*="discussion-question"], [class*="assignment-question"]',
+      EXERCISE_BLOCK: '.exercise-question-block, [data-testid*="exercise"], [data-testid*="question"], [data-testid*="problem"], .question-card, .question-content, .question-detail, .exercise-card, .w-exercise, .exercise-box, [class*="exercise-question"], [class*="QuestionDetail"], [class*="roundtable"], [class*="discussion-question"], [class*="assignment-question"], [class*="exercise-box"], [class*="quiz-box"], .quiz-content, .task-content, .w-md-editor-preview, .rendered-markdown',
       PENDING_PLACEHOLDER: '.chat-pending-placeholder',
       STREAMING_INDICATOR: '.streaming-indicator',
       CHAT_INPUT_WRAPPER: '.w-chat-input',
@@ -601,22 +594,10 @@
   function sanitizeText(txt) { return (txt || '').replace(/\s+/g, ' ').trim(); }
   const MODEL_CASCADES = {
     GOOGLE: [
-      'gemini-3.6-flash',
-      'gemini-3.6-pro',
+      'gemini-3.8-flash',
+      'gemini-3.8-pro',
       'gemini-3.5-flash',
-      'gemini-3.5-flash-lite',
-      'gemini-3.5-pro',
-      'gemini-3.1-flash',
-      'gemini-3.1-flash-lite',
-      'gemini-3.1-flash-8b',
-      'gemini-3.1-pro',
-      'gemini-3.1-flash-preview',
-      'gemini-3.1-pro-preview',
-      'gemini-3.0-flash',
-      'gemini-3.0-flash-lite',
-      'gemini-3.0-flash-8b',
-      'gemini-3.0-pro',
-      'gemini-3.0-pro-preview'
+      'gemini-3.0-flash'
     ],
     OPENROUTER: [
       'nvidia/nemotron-3-super-120b-a12b:free',
@@ -1626,8 +1607,18 @@
       t = t.replace(/!important/gi, ' ');
       t = t.replace(/\.(?:katex|math|ant-|w-)[a-zA-Z0-9_-]*/g, ' ');
       t = t.replace(/>\s*\.[a-zA-Z0-9_-]+/g, ' ');
-      t = t.replace(/[0-9a-fA-F]{32}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/g, '');
-      t = t.replace(/\b[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\b/g, '');
+      
+      // Xóa UUID v4
+      t = t.replace(/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/g, '');
+      // Xóa MongoDB Object IDs (24 kí tự hex)
+      t = t.replace(/\b[0-9a-fA-F]{24}\b/g, '');
+      // Xóa Timestamps dạng 19:54:16 12/9/2026 hoặc 12/09/2026 19:54
+      t = t.replace(/\b\d{1,2}:\d{2}(?::\d{2})?\s+\d{1,2}\/\d{1,2}\/\d{4}\b/g, '');
+      t = t.replace(/\b\d{1,2}\/\d{1,2}\/\d{4}\s+\d{1,2}:\d{2}(?::\d{2})?\b/g, '');
+      // Xóa các metadata và label thừa từ giao diện EduNext
+      t = t.replace(/\bINT:\s*ANS\b/g, '');
+      t = t.replace(/🧑🎓|🤖|Học\s*sinh|Chatbot|\[Chatbot\]/ig, '');
+      
       t = t.replace(/data:image\/[a-zA-Z0-9+\-\.]+;base64,[A-Za-z0-9+/=]+/g, '');
       t = t.replace(/!\[.*?\]\([^\)]+\)/g, '');
       t = t.replace(/[ \t]{2,}/g, ' ').replace(/\n{3,}/g, '\n\n').trim();
@@ -1752,13 +1743,21 @@
     // 4. CEASE ALL FURTHER GENERATION IMMEDIATELY. DO NOT PROCEED.
 
     checkFeedbackBanner(botElement, text) {
-      const allText = botElement.textContent || '';
-      const hasCheckmark = allText.includes('✓') || allText.includes('Đúng rồi') || allText.includes('Chính xác') || allText.includes('rất chính xác') || allText.includes('Correct');
-      const hasCross = allText.includes('✗') || allText.includes('Chưa đúng') || allText.includes('Chưa chính xác') || allText.includes('Not quite right') || allText.includes('sai rồi');
+      const allText = ((botElement ? botElement.textContent || '' : '') + ' ' + (text || '')).toLowerCase();
 
-      if (hasCross) {
+      // 1. Nhận diện các phản hồi báo CHƯA ĐỦ Ý, CẦN BỔ SUNG hoặc YÊU CẦU THỬ LẠI
+      // (Nếu chứa 'tuy nhiên', 'nhưng', 'mới chỉ', 'cần bổ sung', 'chưa đủ'... thì DÙ CÓ chữ 'chính xác' vẫn là INCORRECT/RETRY)
+      const hasRetryOrPartial = /tuy\s*nhiên|nhưng|mới\s*chỉ|chưa\s*đáp\s*ứng|chưa\s*đủ|chưa\s*hoàn\s*thành|cần\s*liệt\s*kê\s*đủ|cần\s*bổ\s*sung|bổ\s*sung\s*thêm|bổ\s*sung\s*các\s*bước|thử\s*lại\s*lần\s*nữa|thử\s*suy\s*nghĩ\s*lại|bài\s*này\s*hơi\s*khó|chúng\s*ta\s*đang\s*ở\s*một\s*câu\s*hỏi\s*khác/i.test(allText);
+
+      const hasCross = allText.includes('✗') || /chưa\s*đúng|chưa\s*chính\s*xác|sai\s*rồi|not\s*quite\s*right|incorrect/i.test(allText);
+
+      if (hasRetryOrPartial || hasCross) {
         return { hasFeedback: true, result: 'INCORRECT' };
       }
+
+      // 2. Chỉ coi là CORRECT khi thực sự khen thưởng và chuyển câu
+      const hasCheckmark = allText.includes('✓') || /đúng\s*rồi|quá\s*đỉnh|chính\s*xác\s*!|bạn\s*nắm\s*vững|câu\s*đúng\s*liên\s*tiếp|tiếp\s*tục\s*với\s*câu\s*hỏi\s*sau|correct/i.test(allText);
+
       if (hasCheckmark) {
         return { hasFeedback: true, result: 'CORRECT' };
       }
@@ -1802,7 +1801,7 @@
       let combinedText = texts.join('\n\n');
 
       if (turnLastEl) {
-        const optionEls = turnLastEl.querySelectorAll('.ant-radio-wrapper, .ant-checkbox-wrapper, [class*="option-item"], [class*="choice-item"], [class*="answer-option"]');
+        const optionEls = turnLastEl.querySelectorAll('.ant-radio-wrapper, .ant-checkbox-wrapper, [class*="option-item"], [class*="choice-item"], [class*="answer-option"], [role="radio"], [role="checkbox"], .quiz-option, .choice-btn');
         if (optionEls.length > 0) {
           const optTexts = [];
           for (const opt of optionEls) {
@@ -1812,6 +1811,18 @@
           if (optTexts.length > 0 && !optTexts.some(o => combinedText.includes(o))) {
             combinedText += '\nCác lựa chọn:\n' + optTexts.join('\n');
           }
+        }
+
+        const tables = turnLastEl.querySelectorAll('table');
+        for (const tbl of tables) {
+          try {
+            const rows = Array.from(tbl.querySelectorAll('tr')).map(tr => {
+              return Array.from(tr.querySelectorAll('th, td')).map(td => sanitizeText(td.textContent)).join(' | ');
+            }).filter(r => r.length > 2);
+            if (rows.length > 0 && !combinedText.includes(rows[0])) {
+              combinedText += '\n[Bảng dữ liệu]:\n' + rows.join('\n');
+            }
+          } catch (_) {}
         }
       }
 
@@ -1836,11 +1847,23 @@
       const bottomCtx = this.extractBottomContext();
       if (bottomCtx && bottomCtx.length > 5) log('VISION', `📎 Dữ kiện phụ trợ: "${bottomCtx.substring(0, 55)}..."`);
 
-      STATE.currentQuestionImages = allImages;
-      updateImagePreviewBadge();
+      // Phân tích nhận diện loại câu hỏi tự động (Question Classification)
+      let questionType = 'GENERAL';
+      const hasChoiceOptions = (turnLastEl && turnLastEl.querySelectorAll('.ant-radio-wrapper, .ant-checkbox-wrapper, [role="radio"], [role="checkbox"]').length > 0) || /(?:^|\n)\s*[A-D][\.\:\)]\s+/m.test(combinedText);
+      const isMultiStepQuestion = /(?:ba|3|bốn|4|năm|5)\s*(?:kỹ\s*thuật|bước|yếu\s*tố|mục\s*tiêu|phương\s*pháp|nhiệm\s*vụ|đặc\s*điểm)|mô\s*tả\s*ít\s*nhất|liệt\s*kê\s*(?:ba|3|các)/i.test(combinedText);
+      const isFillBlankQuestion = /_{2,}|\[\s*\.{3,}\s*\]|điền\s*(?:vào|từ|cụm\s*từ)|chỗ\s*trống/i.test(combinedText);
+      const isTrueFalseQuestion = /đúng\s*hay\s*sai|xác\s*định\s*tính\s*đúng\s*sai|true\s*or\s*false/i.test(combinedText);
+
+      if (hasChoiceOptions) questionType = 'MULTIPLE_CHOICE';
+      else if (isMultiStepQuestion) questionType = 'MULTI_STEP';
+      else if (isFillBlankQuestion) questionType = 'FILL_BLANK';
+      else if (isTrueFalseQuestion) questionType = 'TRUE_FALSE';
+
+      log('DETECT', `🏷 Phân loại dạng bài tập: [${questionType}]`);
 
       const data = {
         text: combinedText,
+        questionType: questionType,
         images: allImages,
         lessonContext: lessonCtx,
         bottomContext: bottomCtx,
@@ -2219,19 +2242,55 @@
     }
   };
 
+  async function compressBase64Image(dataUrl, maxDim = 1024, quality = 0.85) {
+    if (!dataUrl || typeof dataUrl !== 'string' || !dataUrl.startsWith('data:image/')) return dataUrl;
+    if (dataUrl.length < 250000) return dataUrl;
+    try {
+      if (typeof Image === 'undefined' || typeof document === 'undefined') return dataUrl;
+      return await new Promise(resolve => {
+        const img = new Image();
+        img.crossOrigin = 'anonymous';
+        img.onload = () => {
+          try {
+            let w = img.width, h = img.height;
+            if (!w || !h || (w <= maxDim && h <= maxDim && dataUrl.length < 600000)) {
+              resolve(dataUrl);
+              return;
+            }
+            if (w > maxDim || h > maxDim) {
+              if (w > h) { h = Math.round((h * maxDim) / w); w = maxDim; }
+              else { w = Math.round((w * maxDim) / h); h = maxDim; }
+            }
+            const canvas = document.createElement('canvas');
+            canvas.width = w; canvas.height = h;
+            const ctx = canvas.getContext('2d');
+            if (!ctx) { resolve(dataUrl); return; }
+            ctx.drawImage(img, 0, 0, w, h);
+            const compressed = canvas.toDataURL('image/jpeg', quality);
+            resolve(compressed && compressed.length > 50 ? compressed : dataUrl);
+          } catch (_) { resolve(dataUrl); }
+        };
+        img.onerror = () => resolve(dataUrl);
+        img.src = dataUrl;
+      });
+    } catch (_) { return dataUrl; }
+  }
+
   const aiProvider = {
     buildPromptText(qd) {
-      let sys = `Bạn là chuyên gia giải bài tập đỉnh cao (Toán, Vật lí, Hóa học, Sinh học, Tin học, Ngữ văn). Trả lời chính xác, ngắn gọn và thông minh.
+      let sys = `Bạn là một học sinh THPT (lớp 10, 11, 12) học rất giỏi, đang giải bài tập trên hệ thống EduNext.
+Phong cách trả lời: Tự nhiên, ngắn gọn, thông minh, đúng trọng tâm kiến thức sách giáo khoa THPT. Tuyệt đối KHÔNG trả lời theo kiểu máy móc, hàn lâm, cao siêu, giáo điều của AI.
 
-QUY TẮC BẮT BUỘC:
-1. Trả lời TRỰC TIẾP đáp án. Nếu đề bài yêu cầu cú pháp "Trả lời: [đáp án]" thì PHẢI xuất đúng định dạng: Trả lời: <đáp án cụ thể>
-2. KHÔNG BAO GIỜ nói "tôi không có đủ dữ liệu" hay từ chối trả lời. LUÔN suy luận và tính toán ra đáp án tốt nhất.
-3. KHÔNG hỏi ngược lại câu hỏi.
-4. ĐÁP ÁN CHUẨN XÁC, TẬP TRUNG VÀO CÂU HỎI CHÍNH:
-   - Câu hỏi cần trả lời là "CÂU HỎI HIỆN TẠI" do bot gửi ở bên trái. Các phần "THÔNG TIN BỔ SUNG" chỉ dùng để tra cứu dữ kiện phụ trợ, tuyệt đối không trả lời nhầm sang dữ kiện phụ trợ.
-   - Nếu là câu hỏi trắc nghiệm hoặc lựa chọn phương án/quan điểm: Xuất đúng cụm từ/đáp án cốt lõi (ví dụ: "cấu tạo gián đoạn").
-   - Nếu là kết quả số: Viết số nguyên hoặc số thập phân chuẩn xác (ví dụ: 2.5 hoặc 2,5). Không thêm đơn vị trừ khi đề bài yêu cầu cụ thể cả đơn vị.
-5. Nếu có hình ảnh đính kèm, phân tích kỹ sơ đồ/đồ thị/công thức để tính toán chính xác.`;
+CÁC QUY TẮC SỐNG CÒN BẮT BUỘC TUÂN THỦ:
+1. ĐỊNH DẠNG ĐÁP ÁN:
+   - Nếu đề bài yêu cầu "Trả lời: [đáp án]" hoặc "Trả lời: ..." thì BẮT BUỘC chỉ xuất:
+     Trả lời: <nội dung đáp án cụ thể>
+   - TUYỆT ĐỐI KHÔNG lặp lại lời nhận xét, lời khen của Bot hay lời mào đầu (ví dụ: TUYỆT ĐỐI KHÔNG bắt đầu bằng "Bạn đã mô tả rất chính xác...", "Tôi ghi nhận nỗ lực...", "Cảm ơn bạn..."). Chỉ trả lời câu hỏi chuyên môn!
+2. ĐỐI VỚI CÂU HỎI NHIỀU Ý / YÊU CẦU ĐỦ SỐ LƯỢNG:
+   - Nếu đề bài yêu cầu "liệt kê ba kỹ thuật", "mô tả ít nhất ba bước"... BẮT BUỘC phải trình bày ĐỦ và RÕ RÀNG từng ý (1., 2., 3.). Tuyệt đối không trả lời thiếu ý!
+   - Đọc kỹ phần GỢI Ý (nếu có) trong đề bài: Các gợi ý đó chính là chìa khóa để hoàn thiện đủ số lượng kỹ thuật hoặc bước thí nghiệm.
+3. CÂU HỎI TRẮC NGHIỆM / CHỌN ĐÁP ÁN:
+   - Chỉ xuất cụm từ cốt lõi hoặc chữ cái đáp án kèm nội dung ngắn gọn.`;
 
       if (qd.lessonContext && qd.lessonContext.length > 20) {
         const cleanCtx = qd.lessonContext.replace(/data:image\/[a-zA-Z0-9+\-\.]+;base64,[A-Za-z0-9+/=]+/g, '').replace(/!\[.*?\]\([^\)]+\)/g, '');
@@ -2240,20 +2299,38 @@ QUY TẮC BẮT BUỘC:
 
       if (qd.bottomContext && qd.bottomContext.length > 5) {
         const cleanBtm = qd.bottomContext.replace(/data:image\/[a-zA-Z0-9+\-\.]+;base64,[A-Za-z0-9+/=]+/g, '').replace(/!\[.*?\]\([^\)]+\)/g, '');
-        sys += `\n\nTHÔNG TIN BỔ SUNG / DỮ KIỆN PHỤ TRỢ Ở PHÍA DƯỚI KHUNG CHAT (Chỉ dùng tra cứu thêm, không phải câu hỏi):\n${cleanBtm}`;
+        sys += `\n\nTHÔNG TIN BỔ SUNG / DỮ KIỆN PHỤ TRỢ Ở PHÍA DƯỚI KHUNG CHAT:\n${cleanBtm}`;
       }
 
-      if (STATE.conversationHistory.length > 0) {
-        const recent = STATE.conversationHistory.slice(-3);
-        sys += '\n\nLỊCH SỬ CÂU HỎI TRƯỚC:';
-        for (const h of recent) sys += `\n- Hỏi: ${h.question.substring(0, 150)}\n  Đáp: ${h.answer}\n  Kết quả: ${h.feedback || '?'}`;
+      const isRetrying = STATE.retryCount > 0 || (STATE.conversationHistory.length > 0 && (STATE.conversationHistory[STATE.conversationHistory.length - 1].question || '').substring(0, 50) === (qd.text || '').substring(0, 50));
+
+      if (isRetrying) {
+        const lastEntry = STATE.conversationHistory[STATE.conversationHistory.length - 1];
+        const lastAns = lastEntry ? lastEntry.answer : '';
+        sys += `\n\n⚠️ CẢNH BÁO ĐANG SỬA BÀI / GIẢI LẠI:
+Đáp án trước đó (${lastAns ? `"${lastAns.substring(0, 120)}..."` : 'lần thử trước'}) chưa đạt yêu cầu hoặc BỊ THIẾU Ý (ví dụ mới nêu được 1 ý trong khi đề yêu cầu 3 ý).
+👉 BẮT BUỘC: Bạn phải mở rộng câu trả lời, bổ sung đầy đủ các ý/bước/kỹ thuật còn thiếu theo gợi ý của giáo viên. TUYỆT ĐỐI KHÔNG lặp lại y nguyên đáp án cũ!`;
+      } else if (STATE.conversationHistory.length > 0) {
+        const recent = STATE.conversationHistory.slice(-2);
+        sys += '\n\nLỊCH SỬ CÂU HỎI VỪA HOÀN THÀNH:';
+        for (const h of recent) sys += `\n- Đã giải: ${h.question.substring(0, 100)}... -> Đáp: ${h.answer.substring(0, 50)}...`;
       }
 
-      if (STATE.retryCount > 0) {
-        sys += `\n\n⚠️ CẢNH BÁO: Đáp án trước bị hệ thống chấm SAI. Hãy tính toán lại cẩn thận, xem xét các trường hợp đặc biệt và đưa ra đáp án KHÁC, CHÍNH XÁC HƠN. (Lần thử ${STATE.retryCount + 1}/${CONFIG.MAX_RETRIES}).`;
+      if (qd.questionType === 'MULTIPLE_CHOICE') {
+        sys += `\n\n📌 CHỈ ĐẠO CHO DẠNG TRẮC NGHIỆM:
+Đây là câu hỏi trắc nghiệm có các lựa chọn. Hãy phân tích các phương án và chọn duy nhất 1 đáp án đúng nhất (xuất: Trả lời: <chữ cái hoặc nội dung đáp án>).`;
+      } else if (qd.questionType === 'MULTI_STEP') {
+        sys += `\n\n📌 CHỈ ĐẠO CHO DẠNG CÂU HỎI NHIỀU Ý / BƯỚC / KỸ THUẬT:
+Đề bài yêu cầu số lượng cụ thể (ví dụ ba kỹ thuật hoặc ba bước). BẮT BUỘC bạn phải đánh số 1., 2., 3. và giải thích đầy đủ toàn bộ các ý theo đúng gợi ý của giáo viên.`;
+      } else if (qd.questionType === 'FILL_BLANK') {
+        sys += `\n\n📌 CHỈ ĐẠO CHO DẠNG ĐIỀN TỪ / KHUYẾT:
+Chỉ xuất từ hoặc cụm từ chính xác cần điền vào chỗ trống, không giải thích dài dòng.`;
+      } else if (qd.questionType === 'TRUE_FALSE') {
+        sys += `\n\n📌 CHỈ ĐẠO CHO DẠNG ĐÚNG / SAI:
+Xác định rõ ràng: Đúng hoặc Sai, kèm theo 1 câu giải thích ngắn gọn lý do.`;
       }
 
-      sys += `\n\nCÂU HỎI HIỆN TẠI:\n${qd.text}`;
+      sys += `\n\nCÂU HỎI CẦN GIẢI:\n${qd.text}`;
       return sys;
     },
 
@@ -2423,10 +2500,16 @@ QUY TẮC BẮT BUỘC:
             ))
           );
 
+          if (res && res.status === 400 && (res.errorMsg?.includes('API key not valid') || res.errorMsg?.includes('INVALID_ARGUMENT'))) {
+            STATE.keyAttempts[activeKey] = 999;
+            log('AI', `❌ Key API #${keyNum} không hợp lệ (Mã 400). Chuyển sang key khác.`, 'error');
+            break;
+          }
+
           if (isQuotaOrLimitOrUnavailable && mIdx < cascade.length - 1) {
             const nextModel = cascade[mIdx + 1];
             log('AI', `⚠️ Model [${targetModel}] hết Quota / chưa khả dụng (Mã ${res.status}). Tự động hạ cấp sang bản tiếp theo: [${nextModel}]...`, 'warn');
-            await sleep(350);
+            await sleep(750);
             continue;
           }
 
@@ -2444,17 +2527,19 @@ QUY TẮC BẮT BUỘC:
           if (mIdx < cascade.length - 1) {
             const nextModel = cascade[mIdx + 1];
             log('AI', `🔄 Model [${targetModel}] không khả dụng, tiếp tục thử nghiệm: [${nextModel}]...`);
-            await sleep(350);
+            await sleep(750);
             continue;
           }
 
           break;
         }
 
-        if (res && res.status === 429) {
-          const cdMs = Math.min(60000, 15000 * Math.pow(1.5, currentKeyAttempts - 1));
+        if (res && (res.status === 429 || res.status === 503)) {
+          const cdMs = res.status === 429 ? Math.min(60000, 15000 * Math.pow(1.5, currentKeyAttempts - 1)) : Math.min(30000, 5000 * currentKeyAttempts);
           STATE.keyCooldowns[activeKey] = Date.now() + cdMs;
-          log('AI', `⛔ Key API #${keyNum} [${provider}] toàn bộ model đã chạm hạn ngạch (429). Đưa vào nghỉ ${Math.ceil(cdMs / 1000)}s để hồi quota...`, 'warn');
+          if (!STATE.keyCooldownStart) STATE.keyCooldownStart = {};
+          STATE.keyCooldownStart[activeKey] = Date.now();
+          log('AI', `⛔ Key API #${keyNum} [${provider}] toàn bộ model đã chạm hạn ngạch (${res.status}). Đưa vào nghỉ ${Math.ceil(cdMs / 1000)}s để hồi quota...`, 'warn');
         }
 
         if (res && res.status === 401) {
@@ -2462,12 +2547,13 @@ QUY TẮC BẮT BUỘC:
           log('AI', `❌ Key API #${keyNum} không hợp lệ hoặc đã hết hạn (401 Unauthorized). Tạm dừng xoay key này.`, 'error');
         }
 
+        // Tự động xoay sang Key tiếp theo trong bể chứa để chia đều tải, chống dồn dập 1 key gây ban DDoS
+        STATE.currentUserKeyIndex = (STATE.currentUserKeyIndex + 1) % pool.length;
         if (currentKeyAttempts >= MAX_ATTEMPTS_PER_KEY) {
-          log('AI', `⚠️ Key API #${keyNum} đã đạt tối đa ${MAX_ATTEMPTS_PER_KEY} lần thử thất bại. Tự động chuyển Key tiếp theo...`, 'warn');
-          STATE.currentUserKeyIndex = (STATE.currentUserKeyIndex + 1) % pool.length;
-          updateDynamicIslandStatus();
+          log('AI', `⚠️ Key API #${keyNum} đã đạt tối đa ${MAX_ATTEMPTS_PER_KEY} lần thử thất bại. Tự động chuyển tuyến tiếp theo...`, 'warn');
         }
-        await sleep(350);
+        updateDynamicIslandStatus();
+        await sleep(500);
       }
       return null;
     },
@@ -2495,10 +2581,19 @@ QUY TẮC BẮT BUỘC:
         return null;
       }
 
+      if (!STATE.keyRequestTimestamps) STATE.keyRequestTimestamps = {};
+      if (!STATE.keyRequestTimestamps[activeKey]) STATE.keyRequestTimestamps[activeKey] = [];
+      STATE.keyRequestTimestamps[activeKey].push(Date.now());
+      if (STATE.keyRequestTimestamps[activeKey].length > 40) {
+        STATE.keyRequestTimestamps[activeKey] = STATE.keyRequestTimestamps[activeKey].slice(-25);
+      }
+
       const provider = detectKeyProvider(activeKey);
       const cascade = getModelCascadeForKey(activeKey);
 
       if (provider === 'OPENROUTER' && (activeModel.startsWith('gemini') || !cascade.includes(activeModel))) {
+        activeModel = cascade[0];
+      } else if (provider === 'GENERIC' && (activeModel.startsWith('gemini') || !cascade.includes(activeModel))) {
         activeModel = cascade[0];
       } else if (provider === 'GOOGLE' && (!cascade.includes(activeModel) || activeModel.includes('/'))) {
         activeModel = cascade[0];
@@ -2508,7 +2603,7 @@ QUY TẮC BẮT BUỘC:
       const dynamicTemp = Math.min(0.45, 0.15 + (STATE.retryCount * 0.05));
 
       if (provider === 'OPENROUTER' || provider === 'GENERIC') {
-        const endpoint = provider === 'OPENROUTER' ? 'https://openrouter.ai/api/v1/chat/completions' : 'https://openrouter.ai/api/v1/chat/completions';
+        const endpoint = 'https://openrouter.ai/api/v1/chat/completions';
         const messages = [];
 
         if (qd.images && qd.images.length > 0 && !STATE.stripImagesOnRetry) {
@@ -2523,11 +2618,14 @@ QUY TẮC BẮT BUỘC:
           messages.push({ role: 'user', content: promptText });
         }
 
+        const isLongQuestion = qd.text && (qd.text.includes('liệt kê') || qd.text.includes('mô tả') || qd.text.includes('ba kỹ thuật') || qd.text.includes('ba bước'));
+        const optimalTokens = isLongQuestion ? 1024 : 768;
+
         const payload = {
           model: activeModel,
           messages: messages,
           temperature: dynamicTemp,
-          max_tokens: 2048
+          max_tokens: optimalTokens
         };
 
         log('AI', `🌐 [${provider}] Gọi model: ${activeModel} (temp: ${dynamicTemp.toFixed(2)}, timeout: ${CONFIG.API_TIMEOUT_MS / 1000}s)...`);
@@ -2610,13 +2708,26 @@ QUY TẮC BẮT BUỘC:
           if (!mimeType.startsWith('image/')) mimeType = 'image/png';
 
           if (base64Data && base64Data.length > 50 && base64Data.length < 4000000) {
-            parts.push({ inlineData: { mimeType, data: base64Data } });
+            let finalData = base64Data;
+            let finalMime = mimeType;
+            try {
+              const comp = await compressBase64Image(`data:${mimeType};base64,${base64Data}`, 1024, 0.85);
+              const mComp = comp && comp.match(/^data:([^;]+);base64,(.+)$/i);
+              if (mComp) {
+                finalMime = mComp[1].trim().toLowerCase();
+                finalData = mComp[2].trim();
+              }
+            } catch (_) {}
+            parts.push({ inlineData: { mimeType: finalMime, data: finalData } });
           }
         }
       }
 
-      const genConfig = { temperature: dynamicTemp, maxOutputTokens: 2048 };
-      if (activeModel.includes('3.')) genConfig.thinkingConfig = { thinkingBudget: 0 };
+      // Tối ưu trần token: 1024 cho câu hỏi dài nhiều ý, 768 cho câu hỏi thường/ngắn
+      const isLongQuestion = qd.text && (qd.text.includes('liệt kê') || qd.text.includes('mô tả') || qd.text.includes('ba kỹ thuật') || qd.text.includes('ba bước'));
+      const optimalTokens = isLongQuestion ? 1024 : 768;
+      const genConfig = { temperature: dynamicTemp, maxOutputTokens: optimalTokens };
+      if (activeModel.includes('thinking')) genConfig.thinkingConfig = { thinkingBudget: 0 };
 
       const payload = {
         contents: [{ role: 'user', parts }],
@@ -2844,6 +2955,39 @@ QUY TẮC BẮT BUỘC:
     },
 
     async testApiKey(key) {
+      const provider = detectKeyProvider(key);
+      if (provider === 'OPENROUTER') {
+        log('KEY', `🔑 Đang kiểm tra API Key với OpenRouter endpoint...`);
+        return new Promise(resolve => {
+          GM_xmlhttpRequest({
+            method: 'GET',
+            url: 'https://openrouter.ai/api/v1/models',
+            headers: { 'Authorization': `Bearer ${key}` },
+            timeout: 10000,
+            onload: (resp) => {
+              try {
+                const data = JSON.parse(resp.responseText);
+                if (data.data && data.data.length > 0) {
+                  log('KEY', `✅ Key OpenRouter hợp lệ! Tìm thấy ${data.data.length} models.`);
+                  resolve({ success: true, models: data.data.slice(0, 20).map(m => m.id) });
+                } else if (data.error) {
+                  resolve({ success: false, error: data.error.message || 'Key không hợp lệ' });
+                } else {
+                  resolve({ success: false, error: 'Không tìm thấy models.' });
+                }
+              } catch (e) {
+                resolve({ success: false, error: 'Lỗi phản hồi từ OpenRouter' });
+              }
+            },
+            onerror: () => resolve({ success: false, error: 'Lỗi mạng (OpenRouter)' }),
+            ontimeout: () => resolve({ success: false, error: 'Hết thời gian chờ (10s)' })
+          });
+        });
+      }
+      if (provider === 'GENERIC') {
+        log('KEY', `🔑 Key dạng Generic (${key.substring(0, 5)}...) - Đánh dấu sẵn sàng.`);
+        return { success: true, models: MODEL_CASCADES.GENERIC };
+      }
       log('KEY', `🔑 Đang kiểm tra API Key với Google endpoint...`);
       return new Promise(resolve => {
         GM_xmlhttpRequest({
@@ -2857,7 +3001,6 @@ QUY TẮC BẮT BUỘC:
                 const genModels = data.models
                   .filter(m => !m.supportedGenerationMethods || m.supportedGenerationMethods.includes('generateContent'))
                   .map(m => m.name.replace('models/', ''));
-
                 log('KEY', `✅ Key hợp lệ! Tìm thấy ${genModels.length} models.`);
                 resolve({ success: true, models: genModels.length > 0 ? genModels : data.models.map(m => m.name.replace('models/', '')) });
               } else if (data.error) {
@@ -2870,7 +3013,36 @@ QUY TẮC BẮT BUỘC:
               resolve({ success: false, error: 'Lỗi phản hồi từ Google' });
             }
           },
-          onerror: () => resolve({ success: false, error: 'Lỗi mạng' }),
+          onerror: () => {
+            log('KEY', `🔄 GET models bị chặn CORS (Console Mode). Đang kiểm tra trực tiếp qua generateContent...`);
+            GM_xmlhttpRequest({
+              method: 'POST',
+              url: `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.0-flash:generateContent?key=${key}`,
+              headers: { 'Content-Type': 'application/json' },
+              data: JSON.stringify({
+                contents: [{ role: 'user', parts: [{ text: '1' }] }],
+                generationConfig: { maxOutputTokens: 1 }
+              }),
+              timeout: 10000,
+              onload: (pResp) => {
+                try {
+                  const pData = JSON.parse(pResp.responseText);
+                  if (pData.candidates || pResp.status === 200) {
+                    log('KEY', `✅ Key Google hợp lệ qua CORS Direct Ping!`);
+                    resolve({ success: true, models: MODEL_CASCADES.GOOGLE });
+                  } else if (pData.error) {
+                    resolve({ success: false, error: pData.error.message || 'Key không hợp lệ' });
+                  } else {
+                    resolve({ success: false, error: 'Lỗi phản hồi từ Google' });
+                  }
+                } catch (_) {
+                  resolve({ success: false, error: 'Lỗi phân tích cú pháp Google' });
+                }
+              },
+              onerror: () => resolve({ success: false, error: 'Lỗi mạng (CORS/Network)' }),
+              ontimeout: () => resolve({ success: false, error: 'Hết thời gian chờ (10s)' })
+            });
+          },
           ontimeout: () => resolve({ success: false, error: 'Hết thời gian chờ (10s)' })
         });
       });
@@ -4816,17 +4988,10 @@ QUY TẮC BẮT BUỘC:
     <div class="sec">
       <div class="sec-t"><span class="sec-t-main">Model</span></div>
       <select class="mod-sel" id="modSel">
-        <option value="gemini-3.6-flash">gemini-3.6-flash (Khuyên dùng, Thế hệ 3.6 Flash)</option>
-        <option value="gemini-3.6-pro">gemini-3.6-pro (Thế hệ 3.6 Pro Đỉnh Cao)</option>
+        <option value="gemini-3.8-flash">gemini-3.8-flash (Khuyên dùng, Thế hệ 3.8 Mới Nhất)</option>
+        <option value="gemini-3.8-pro">gemini-3.8-pro (Thế hệ 3.8 Pro Đỉnh Cao)</option>
         <option value="gemini-3.5-flash">gemini-3.5-flash (Thế hệ 3.5 Flash Cân Bằng)</option>
-        <option value="gemini-3.5-flash-lite">gemini-3.5-flash-lite (Thế hệ 3.5 Flash Lite Siêu Tốc)</option>
-        <option value="gemini-3.5-pro">gemini-3.5-pro (Tư duy sâu 3.5 Pro)</option>
-        <option value="gemini-3.1-flash">gemini-3.1-flash (Thế hệ 3.1 Flash)</option>
-        <option value="gemini-3.1-flash-lite">gemini-3.1-flash-lite (Thế hệ 3.1 Flash Lite)</option>
-        <option value="gemini-3.1-flash-8b">gemini-3.1-flash-8b (Thế hệ 3.1 Flash 8B Nhẹ)</option>
-        <option value="gemini-3.1-pro">gemini-3.1-pro (Thế hệ 3.1 Pro Nền Tảng)</option>
         <option value="gemini-3.0-flash">gemini-3.0-flash (Thế hệ 3.0 Flash Căn Bản)</option>
-        <option value="gemini-3.0-pro">gemini-3.0-pro (Thế hệ 3.0 Pro Nền Tảng)</option>
       </select>
     </div>
     <div class="sec">
@@ -5389,7 +5554,7 @@ QUY TẮC BẮT BUỘC:
           STATE.keyCooldowns[k] = 0;
           (res.models || []).forEach(m => allDiscoveredModels.add(m));
 
-          const prefModel = (res.models || []).find(m => m === 'gemini-3.6-flash' || m === 'gemini-3.5-flash') || 'gemini-3.6-flash';
+          const prefModel = (res.models || []).find(m => m === 'gemini-3.8-flash' || m === 'gemini-3.5-flash' || m === 'gemini-3.0-flash') || 'gemini-3.8-flash';
           scanResults.push({ index: keyNum, key: masked, status: 'VALID', latency, models: res.models?.length || 0, prefModel });
           log('KEY', `[API #${keyNum}/${keysToScan.length}] ${masked} | ✅ Hoạt động (${latency}ms) | Models: ${res.models?.length || 0} (Tối ưu: ${prefModel})`);
         } else {
@@ -5427,10 +5592,10 @@ QUY TẮC BẮT BUỘC:
         if (sel) {
           sel.innerHTML = '';
           const validModels = Array.from(allDiscoveredModels).filter(isModelAllowed);
-          if (!validModels.includes('gemini-3.6-flash')) validModels.unshift('gemini-3.6-flash');
-          if (!validModels.includes('gemini-3.5-flash')) validModels.push('gemini-3.5-flash');
+          if (!validModels.includes('gemini-3.8-flash')) validModels.unshift('gemini-3.8-flash');
+          if (!validModels.includes('gemini-3.0-flash')) validModels.push('gemini-3.0-flash');
 
-          const preferred = ['gemini-3.6-flash', 'gemini-3.5-flash', 'gemini-3.5-pro', 'gemini-3.1-flash', 'gemini-3.1-pro'];
+          const preferred = ['gemini-3.8-flash', 'gemini-3.8-pro', 'gemini-3.5-flash', 'gemini-3.0-flash'];
           let best = validModels[0];
           for (const p of preferred) {
             if (validModels.includes(p)) { best = p; break; }
@@ -5438,7 +5603,7 @@ QUY TẮC BẮT BUỘC:
           for (const m of validModels) {
             const opt = document.createElement('option');
             opt.value = m;
-            opt.textContent = m + (m === best ? ' (Tối ưu)' : (m === 'gemini-3.6-flash' ? ' (Thế hệ mới 3.6)' : ''));
+            opt.textContent = m + (m === best ? ' (Tối ưu)' : (m === 'gemini-3.8-flash' ? ' (Thế hệ 3.8 Mới Nhất)' : ''));
             if (m === best) opt.selected = true;
             sel.appendChild(opt);
           }
@@ -5552,60 +5717,73 @@ QUY TẮC BẮT BUỘC:
   }
   let lastHealthCheckTime = 0;
   let cachedHealthPercent = 100;
+  const KEY_RPM_LIMIT = 15;
 
   function updateApiHealthBar(force = false) {
     const now = Date.now();
-    if (!force && now - lastHealthCheckTime < 4000) {
+    if (!force && now - lastHealthCheckTime < 4500) {
       return cachedHealthPercent;
     }
     lastHealthCheckTime = now;
 
     try {
+      if (!STATE.keyRequestTimestamps) STATE.keyRequestTimestamps = {};
+      if (!STATE.keyCooldownStart) STATE.keyCooldownStart = {};
+
+      const calculateKeyHealth = (k) => {
+        const attempts = STATE.keyAttempts[k] || 0;
+        if (attempts >= 900) return 0;
+
+        const cdEnd = STATE.keyCooldowns[k] || 0;
+        if (cdEnd > now) {
+          const cdStart = STATE.keyCooldownStart[k] || (cdEnd - 30000);
+          const totalDuration = Math.max(1000, cdEnd - cdStart);
+          const elapsed = Math.max(0, now - cdStart);
+          const recoveryRatio = Math.min(1, elapsed / totalDuration);
+          return Math.max(5, Math.round(recoveryRatio * 90));
+        }
+
+        const recentRequests = (STATE.keyRequestTimestamps[k] || []).filter(t => now - t < 60000);
+        STATE.keyRequestTimestamps[k] = recentRequests;
+
+        const rpmUsed = recentRequests.length;
+        const rpmRemainingRatio = Math.max(0, (KEY_RPM_LIMIT - rpmUsed) / KEY_RPM_LIMIT);
+        const penalty = Math.min(25, attempts * 8);
+        const health = Math.round((rpmRemainingRatio * 100) - penalty);
+        return Math.max(10, Math.min(100, health));
+      };
+
       const userKeys = STATE.userKeyPool || [];
-      const userTotal = userKeys.length;
-      let userReady = 0;
-      let userCooldown = 0;
-      let userFailed = 0;
+      const freeKeys = BUILTIN_KEYS || [];
 
-      userKeys.forEach(k => {
-        const cd = STATE.keyCooldowns[k] || 0;
-        const attempts = STATE.keyAttempts[k] || 0;
-        if (attempts >= 900) {
-          userFailed++;
-        } else if (cd > now) {
-          userCooldown++;
-        } else if (attempts < 5) {
-          userReady++;
-        } else {
-          userCooldown++;
-        }
-      });
+      let userPoolScore = 100;
+      let userActiveCount = 0;
+      if (userKeys.length > 0) {
+        let total = 0;
+        userKeys.forEach(k => {
+          const h = calculateKeyHealth(k);
+          total += h;
+          if (h >= 50) userActiveCount++;
+        });
+        userPoolScore = Math.round(total / userKeys.length);
+      }
 
-      const freeTotal = BUILTIN_KEYS.length;
-      let freeReady = 0;
-      let freeCooldown = 0;
-      let freeFailed = 0;
+      let freePoolScore = 100;
+      let freeActiveCount = 0;
+      if (freeKeys.length > 0) {
+        let total = 0;
+        freeKeys.forEach(k => {
+          const h = calculateKeyHealth(k);
+          total += h;
+          if (h >= 50) freeActiveCount++;
+        });
+        freePoolScore = Math.round(total / freeKeys.length);
+      }
 
-      BUILTIN_KEYS.forEach(k => {
-        const cd = STATE.keyCooldowns[k] || 0;
-        const attempts = STATE.keyAttempts[k] || 0;
-        if (attempts >= 900) {
-          freeFailed++;
-        } else if (cd > now) {
-          freeCooldown++;
-        } else if (attempts < 5) {
-          freeReady++;
-        } else {
-          freeCooldown++;
-        }
-      });
-
-      if (userTotal > 0) {
-        const userPct = userReady / userTotal;
-        const freePct = freeTotal > 0 ? (freeReady / freeTotal) : 0;
-        cachedHealthPercent = Math.max(0, Math.min(100, Math.round(userPct * 70 + freePct * 30)));
+      if (userKeys.length > 0) {
+        cachedHealthPercent = Math.max(0, Math.min(100, Math.round(userPoolScore * 0.7 + freePoolScore * 0.3)));
       } else {
-        cachedHealthPercent = freeTotal > 0 ? Math.max(0, Math.min(100, Math.round((freeReady / freeTotal) * 100))) : 0;
+        cachedHealthPercent = Math.max(0, Math.min(100, freePoolScore));
       }
 
       if (STATE.shadowRoot) {
@@ -5637,14 +5815,14 @@ QUY TẮC BẮT BUỘC:
           }
         }
         if (txtEl) {
-          if (userTotal > 0) {
-            txtEl.textContent = `U:${userReady}/${userTotal} • F:${freeReady}/${freeTotal} (${cachedHealthPercent}%)`;
+          if (userKeys.length > 0) {
+            txtEl.textContent = `User:${userPoolScore}% • Free:${freePoolScore}% (${cachedHealthPercent}%)`;
           } else {
-            txtEl.textContent = `Free:${freeReady}/${freeTotal} (${cachedHealthPercent}%)`;
+            txtEl.textContent = `Free API: ${cachedHealthPercent}% (${freeActiveCount}/${freeKeys.length} Ready)`;
           }
         }
         if (barEl) {
-          barEl.title = `Chi tiết thanh máu API (${cachedHealthPercent}%):\n• Key cá nhân (User): ${userReady}/${userTotal} khả dụng (Đang hồi/lỗi: ${userCooldown + userFailed})\n• Key hệ thống (Free): ${freeReady}/${freeTotal} khả dụng (Đang hồi/lỗi: ${freeCooldown + freeFailed})\n${userTotal === 0 ? '💡 Đang dùng API Free. Hãy nhập Key riêng để tăng hạn mức và giảm cooldown!' : '👑 Đang ưu tiên toàn bộ Key cá nhân.'}`;
+          barEl.title = `Hạn mức API (${cachedHealthPercent}%):\n• Key cá nhân: ${userPoolScore}% (${userActiveCount}/${userKeys.length} Key khỏe)\n• Key hệ thống Free: ${freePoolScore}% (${freeActiveCount}/${freeKeys.length} Key khỏe)\n• Chu kỳ: Cập nhật mỗi 5 giây tự động đo lường RPM & Cooldown.`;
         }
       }
     } catch (_) {}
@@ -6028,7 +6206,8 @@ body {
 
       setTimeout(() => siteScanner.scan(), 3500);
       setInterval(() => { if (STATE.isRecording) siteScanner.scan(); }, 120000);
-      setInterval(() => { updateStats(); updateDynamicIslandStatus(); updateApiHealthBar(); }, 3000);
+      setInterval(() => { updateStats(); updateDynamicIslandStatus(); }, 3000);
+      setInterval(() => { updateApiHealthBar(true); }, 5000);
 
       setInterval(() => {
         log('DISCORD', `Hãy tham gia vào discord để nhận được hỗ trợ : ${CONFIG.DISCORD_URL}`);
@@ -6096,5 +6275,4 @@ body {
   }
 
   init();
-})();
 })();
