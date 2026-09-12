@@ -1907,11 +1907,15 @@
       const isMultiStepQuestion = /(?:ba|3|bốn|4|năm|5)\s*(?:kỹ\s*thuật|bước|yếu\s*tố|mục\s*tiêu|phương\s*pháp|nhiệm\s*vụ|đặc\s*điểm)|mô\s*tả\s*ít\s*nhất|liệt\s*kê\s*(?:ba|3|các)/i.test(combinedText);
       const isFillBlankQuestion = /_{2,}|\[\s*\.{3,}\s*\]|điền\s*(?:vào|từ|cụm\s*từ)|chỗ\s*trống/i.test(combinedText);
       const isTrueFalseQuestion = /đúng\s*hay\s*sai|xác\s*định\s*tính\s*đúng\s*sai|true\s*or\s*false/i.test(combinedText);
+      const isNumericalQuestion = /bằng\s*bao\s*nhiêu|tính\s*(?:toán|giá\s*trị|diện\s*tích|thể\s*tích|khối\s*lượng|nồng\s*độ|vận\s*tốc|chu\s*kỳ|tần\s*số)|kết\s*quả\s*là|giá\s*trị\s*(?:của|bằng)|\[Bảng\s*dữ\s*liệu\]/i.test(combinedText);
+      const isConceptQuestion = /(?:thuyết|học\s*thuyết|định\s*luật|nguyên\s*lý|quy\s*luật|khái\s*niệm|thuật\s*ngữ)\s*nào|ai\s*là\s*người|vào\s*năm\s*nào|gọi\s*là\s*gì/i.test(combinedText);
 
       if (hasChoiceOptions) questionType = 'MULTIPLE_CHOICE';
+      else if (isTrueFalseQuestion) questionType = 'TRUE_FALSE';
       else if (isMultiStepQuestion) questionType = 'MULTI_STEP';
       else if (isFillBlankQuestion) questionType = 'FILL_BLANK';
-      else if (isTrueFalseQuestion) questionType = 'TRUE_FALSE';
+      else if (isNumericalQuestion) questionType = 'NUMERICAL';
+      else if (isConceptQuestion) questionType = 'THEORETICAL_CONCEPT';
 
       log('DETECT', `🏷 Phân loại dạng bài tập: [${questionType}]`);
 
@@ -2381,18 +2385,66 @@ CÁC QUY TẮC SỐNG CÒN BẮT BUỘC TUÂN THỦ:
         for (const h of recent) sys += `\n- Đã giải: ${h.question.substring(0, 100)}... -> Đáp: ${h.answer.substring(0, 50)}...`;
       }
 
+      const wrongList = (STATE.wrongAnswers && STATE.wrongAnswers.length > 0)
+        ? STATE.wrongAnswers
+        : [(STATE.conversationHistory[STATE.conversationHistory.length - 1]?.answer || '').replace(/^Trả\s*lời\s*:\s*/i, '').trim()].filter(Boolean);
+
       if (qd.questionType === 'MULTIPLE_CHOICE') {
         sys += `\n\n📌 CHỈ ĐẠO CHO DẠNG TRẮC NGHIỆM:
-Đây là câu hỏi trắc nghiệm có các lựa chọn. Hãy phân tích các phương án và chọn duy nhất 1 đáp án đúng nhất (xuất: Trả lời: <chữ cái hoặc nội dung đáp án>).`;
-      } else if (qd.questionType === 'MULTI_STEP') {
-        sys += `\n\n📌 CHỈ ĐẠO CHO DẠNG CÂU HỎI NHIỀU Ý / BƯỚC / KỸ THUẬT:
-Đề bài yêu cầu số lượng cụ thể (ví dụ ba kỹ thuật hoặc ba bước). BẮT BUỘC bạn phải đánh số 1., 2., 3. và giải thích đầy đủ toàn bộ các ý theo đúng gợi ý của giáo viên.`;
+- Đây là câu hỏi trắc nghiệm chọn phương án.`;
+        if (isRetrying && wrongList.length > 0) {
+          sys += `\n- ⛔ BẮT BUỘC LOẠI TRỪ các phương án đã chọn sai trước đó: ${wrongList.join(', ')}.
+- So sánh kỹ các phương án còn lại với các từ khóa trong phần "GỢI Ý" (Hints) của Bot để chọn phương án đúng duy nhất còn lại.`;
+        } else {
+          sys += `\n- Phân tích các phương án và chọn duy nhất 1 đáp án chính xác nhất.`;
+        }
+        sys += `\n- Định dạng xuất: Trả lời: <chữ cái hoặc nội dung đáp án cốt lõi>.`;
+      } else if (qd.questionType === 'TRUE_FALSE') {
+        sys += `\n\n📌 CHỈ ĐẠO CHO DẠNG ĐÚNG / SAI:`;
+        if (isRetrying && wrongList.length > 0) {
+          const prevWasTrue = wrongList.some(w => /đúng|true/i.test(w));
+          const prevWasFalse = wrongList.some(w => /sai|false/i.test(w));
+          if (prevWasTrue && !prevWasFalse) {
+            sys += `\n- ⚠️ CẢNH BÁO: Đáp án trước đó là "Đúng" đã bị báo sai! BẮT BUỘC LẦN NÀY PHẢI TRẢ LỜI LÀ "Sai" kèm 1 câu giải thích ngắn gọn lý do theo gợi ý của giáo viên.`;
+          } else if (prevWasFalse && !prevWasTrue) {
+            sys += `\n- ⚠️ CẢNH BÁO: Đáp án trước đó là "Sai" đã bị báo sai! BẮT BUỘC LẦN NÀY PHẢI TRẢ LỜI LÀ "Đúng" kèm 1 câu giải thích ngắn gọn lý do theo gợi ý của giáo viên.`;
+          } else {
+            sys += `\n- Đảo ngược nhận định so với lần trả lời trước và giải thích ngắn gọn lý do.`;
+          }
+        } else {
+          sys += `\n- Xác định rõ ràng: Đúng hoặc Sai, kèm theo 1 câu giải thích ngắn gọn lý do.`;
+        }
       } else if (qd.questionType === 'FILL_BLANK') {
         sys += `\n\n📌 CHỈ ĐẠO CHO DẠNG ĐIỀN TỪ / KHUYẾT:
-Chỉ xuất từ hoặc cụm từ chính xác cần điền vào chỗ trống, không giải thích dài dòng.`;
-      } else if (qd.questionType === 'TRUE_FALSE') {
-        sys += `\n\n📌 CHỈ ĐẠO CHO DẠNG ĐÚNG / SAI:
-Xác định rõ ràng: Đúng hoặc Sai, kèm theo 1 câu giải thích ngắn gọn lý do.`;
+- Đây là dạng điền từ vào chỗ trống (___ hoặc [...]).`;
+        if (isRetrying && wrongList.length > 0) {
+          sys += `\n- Từ/cụm từ trước đó (${wrongList.join(', ')}) đã bị báo sai! Hãy chú ý các từ khóa gợi ý trong ngoặc kép hoặc gợi ý của Bot để tìm từ/cụm từ thay thế chuẩn xác nhất.`;
+        }
+        sys += `\n- Chỉ xuất duy nhất từ hoặc cụm từ chính xác cần điền vào chỗ trống, không giải thích dài dòng hay thêm từ ngữ phụ.`;
+      } else if (qd.questionType === 'MULTI_STEP') {
+        sys += `\n\n📌 CHỈ ĐẠO CHO DẠNG CÂU HỎI NHIỀU Ý / BƯỚC / KỸ THUẬT:
+- Đề bài yêu cầu số lượng cụ thể (ví dụ ba kỹ thuật, bốn bước, năm yếu tố...).
+- BẮT BUỘC bạn phải đánh số 1., 2., 3. và giải thích đầy đủ toàn bộ các ý.`;
+        if (isRetrying) {
+          sys += `\n- Đọc kỹ phản hồi của Bot: Nếu Bot nhận xét "bạn mới chỉ nêu được...", hãy giữ lại ý đúng và bổ sung đầy đủ các ý còn thiếu theo đúng gợi ý của Bot!`;
+        }
+      } else if (qd.questionType === 'THEORETICAL_CONCEPT') {
+        sys += `\n\n📌 CHỈ ĐẠO CHO DẠNG HỌC THUYẾT / KHÁI NIỆM / ĐỊNH NGHĨA:
+- Đây là câu hỏi về tên học thuyết, định luật, nguyên lý, hoặc khái niệm khoa học.`;
+        if (isRetrying && wrongList.length > 0) {
+          sys += `\n- Học thuyết/khái niệm trước đó (${wrongList.join(', ')}) ĐÃ BỊ XÁC NHẬN SAI HOÀN TOÀN!
+- Đọc kỹ các từ khóa chỉ bản chất/cơ chế trong phần Gợi ý của Bot (ví dụ: cơ chế hòa trộn, chọn lọc, phân ly, bảo toàn...).
+- Xác định chính xác tên học thuyết/khái niệm mới tương ứng theo chuẩn SGK.`;
+        }
+        sys += `\n- Định dạng xuất: Trả lời: <Tên học thuyết/khái niệm chuẩn xác>.`;
+      } else if (qd.questionType === 'NUMERICAL') {
+        sys += `\n\n📌 CHỈ ĐẠO CHO DẠNG BÀI TẬP TÍNH TOÁN SỐ LIỆU:
+- Đây là bài tập tính toán số hoặc phân tích bảng biểu.`;
+        if (isRetrying && wrongList.length > 0) {
+          sys += `\n- Kết quả tính toán trước đó (${wrongList.join(', ')}) chưa chính xác.
+- Hãy kiểm tra lại công thức, phép tính và số liệu từ bảng hoặc gợi ý phương pháp của giáo viên.`;
+        }
+        sys += `\n- Tính toán cẩn thận từng bước và xuất kết quả chính xác kèm đơn vị (nếu có).`;
       }
 
       sys += `\n\nCÂU HỎI CẦN GIẢI:\n${qd.text}`;
