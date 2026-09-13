@@ -426,6 +426,7 @@
     isPaused: false,
     retryCount: 0,
     wrongAnswers: [],
+    forbidNumericalAnswers: false,
     currentQuestion: null,
     currentAnswer: '',
     conversationHistory: [],
@@ -1311,9 +1312,13 @@
         else if (hasAssistantIndicator) isUser = false;
         else if (isRightAligned) isUser = true;
 
-        if (!isUser && /^\s*Trả\s*lời\s*:/i.test(elText.trim())) {
-          if (!/câu\s*hỏi|gợi\s*ý|tuy\s*nhiên|chính\s*xác|thử\s*lại/i.test(elText)) {
-            isUser = true;
+        if (!isUser) {
+          const hasIntAns = /\bINT:\s*ANS\b/i.test(elText);
+          const hasAnswerPrefix = /\bTrả\s*lời\s*:/i.test(elText);
+          if (hasIntAns || hasAnswerPrefix) {
+            if (!/câu\s*hỏi|gợi\s*ý|tuy\s*nhiên|chính\s*xác|thử\s*lại|hãy\s*thử|lưu\s*ý|lập\s*luận/i.test(elText)) {
+              isUser = true;
+            }
           }
         }
 
@@ -1627,6 +1632,7 @@
 
         if (STATE.lastAnsweredQuestionText && qText !== STATE.lastAnsweredQuestionText) {
           STATE.wrongAnswers = [];
+          STATE.forbidNumericalAnswers = false;
         }
 
         log('DETECT', `🎯 PHÁT HIỆN CÂU HỎI MỚI [Nguồn: ${candidate.source}]: "${qText.substring(0, 70)}..."`);
@@ -1634,6 +1640,7 @@
         if (STATE.autoSolve && (STATE.fsmState === FSM_STATE.IDLE || STATE.fsmState === FSM_STATE.EVALUATING)) {
           STATE.retryCount = 0;
           STATE.wrongAnswers = [];
+          STATE.forbidNumericalAnswers = false;
           STATE.currentQuestionTurnElement = qEl;
           fsmController.transition(FSM_STATE.EXTRACTION);
         }
@@ -1682,10 +1689,42 @@
     },
 
     cleanAnswerText(rawA) {
-      let a = this.cleanTextArtifacts(rawA);
+      if (!rawA || typeof rawA !== 'string') return '';
+      let a = rawA;
+
+      // 1. Gọt bỏ các khối tư duy / thought tags của AI (Gemini, Claude, DeepSeek, v.v.)
+      a = a.replace(/<thought(?:ful)?>[\s\S]*?<\/thought(?:ful)?>/gi, '');
+      a = a.replace(/<thinking>[\s\S]*?<\/thinking>/gi, '');
+
+      // 2. Gọt bỏ các dòng CoT, nháp phép tính và lời mào đầu suy nghĩ trước "Trả lời:"
+      // Ví dụ: "- 4 * 250 = 1000 J.`)" hoặc "* Let's keep it extremely concise as requested: "Trả lời:"
+      a = a.replace(/^[\s\S]*?(?:(?:\*|\-)?\s*(?:let['’]s|here is|here's|here are|i will|i should|suy nghĩ|phân tích|nháp|tính nháp|bước \d)[\s\S]*?(?:["'“]?Trả\s*lời\s*:\s*|\n\n))/i, '');
+      a = a.replace(/^(?:\s*[\*\-]?\s*\d+\s*[\*\+\-\/]\s*\d+\s*=\s*\d+[^;\n]*\n+)+/g, '');
+
+      // 3. Làm sạch các mã rác, CSS, MathML và metadata HTML
+      a = this.cleanTextArtifacts(a);
       if (!a) return '';
-      a = a.replace(/^(\s*(?:Trả\s*lời|Đáp\s*án|Answer|Result)[\s:]+)+/i, '');
-      return a.trim();
+
+      // 4. Nếu AI viết nháp hoặc phân tích rồi chốt hạ bằng cụm "Trả lời: ..." ở cuối câu
+      const lastAnsMatch = a.match(/[\.\;\n]\s*Trả\s*lời\s*:\s*([^\n\r]+)/i);
+      if (lastAnsMatch && lastAnsMatch[1].trim().length > 10) {
+        a = lastAnsMatch[1].trim();
+      } else {
+        const ansMatch = a.match(/(?:^|\n)\s*(?:Trả\s*lời|Đáp\s*án|Answer|Result)\s*:\s*([\s\S]+)/i);
+        if (ansMatch) {
+          a = ansMatch[1].trim();
+        } else {
+          a = a.replace(/^(\s*(?:Trả\s*lời|Đáp\s*án|Answer|Result)[\s:]+)+/i, '').trim();
+        }
+        // Deduplicate các cụm "Trả lời:" bị lặp lại ở giữa câu
+        a = a.replace(/(?:[\.\;\n]\s*)Trả\s*lời\s*:\s*/gi, '; ');
+      }
+
+      // 5. Gọt bỏ ngoặc kép và code blocks bọc ngoài
+      a = a.replace(/^["'“]([\s\S]*)["'”]$/, '$1').trim();
+      a = a.replace(/^```[a-z]*\n([\s\S]*?)\n```$/i, '$1').trim();
+
+      return a;
     },
 
     isTransitionQA(q, a) {
@@ -1799,23 +1838,25 @@
     checkFeedbackBanner(botElement, text) {
       const allText = ((botElement ? botElement.textContent || '' : '') + ' ' + (text || '')).toLowerCase();
 
+      // Nhận diện phản hồi nhắc nhở không yêu cầu con số cụ thể
+      const forbidNum = /không\s*yêu\s*cầu\s*(?:tìm|tính|đưa\s*ra)?\s*(?:một\s*)?(?:giá\s*trị\s*)?số|không\s*phải\s*(?:bài\s*toán\s*)?tính\s*toán|thay\s*vì\s*đưa\s*ra\s*(?:một\s*)?con\s*số|không\s*yêu\s*cầu\s*tính\s*toán\s*giá\s*trị\s*số|bản\s*chất\s*câu\s*hỏi.*?không\s*phải\s*tính\s*toán/i.test(allText);
+
       // 1. Nhận diện các phản hồi báo CHƯA ĐỦ Ý, CẦN BỔ SUNG hoặc YÊU CẦU THỬ LẠI
-      // (Nếu chứa 'tuy nhiên', 'nhưng', 'mới chỉ', 'cần bổ sung', 'chưa đủ'... thì DÙ CÓ chữ 'chính xác' vẫn là INCORRECT/RETRY)
       const hasRetryOrPartial = /tuy\s*nhiên|nhưng|mới\s*chỉ|chưa\s*đáp\s*ứng|chưa\s*đủ|chưa\s*hoàn\s*thành|cần\s*liệt\s*kê\s*đủ|cần\s*bổ\s*sung|bổ\s*sung\s*thêm|bổ\s*sung\s*các\s*bước|thử\s*lại\s*lần\s*nữa|thử\s*suy\s*nghĩ\s*lại|bài\s*này\s*hơi\s*khó|chúng\s*ta\s*đang\s*ở\s*một\s*câu\s*hỏi\s*khác/i.test(allText);
 
-      const hasCross = allText.includes('✗') || /chưa\s*đúng|chưa\s*chính\s*xác|sai\s*rồi|not\s*quite\s*right|incorrect/i.test(allText);
+      const hasCross = allText.includes('✗') || /chưa\s*đúng|chưa\s*chính\s*xác|sai\s*rồi|not\s*quite\s*right|incorrect|chưa\s*phù\s*hợp/i.test(allText);
 
-      if (hasRetryOrPartial || hasCross) {
-        return { hasFeedback: true, result: 'INCORRECT' };
+      if (hasRetryOrPartial || hasCross || forbidNum) {
+        return { hasFeedback: true, result: 'INCORRECT', forbidNumerical: forbidNum };
       }
 
       // 2. Chỉ coi là CORRECT khi thực sự khen thưởng và chuyển câu
       const hasCheckmark = allText.includes('✓') || /đúng\s*rồi|quá\s*đỉnh|chính\s*xác\s*!|bạn\s*nắm\s*vững|câu\s*đúng\s*liên\s*tiếp|tiếp\s*tục\s*với\s*câu\s*hỏi\s*sau|correct/i.test(allText);
 
       if (hasCheckmark) {
-        return { hasFeedback: true, result: 'CORRECT' };
+        return { hasFeedback: true, result: 'CORRECT', forbidNumerical: false };
       }
-      return { hasFeedback: false, result: null };
+      return { hasFeedback: false, result: null, forbidNumerical: false };
     },
 
     async autoSendText(txt) {
@@ -1901,27 +1942,58 @@
       const bottomCtx = this.extractBottomContext();
       if (bottomCtx && bottomCtx.length > 5) log('VISION', `📎 Dữ kiện phụ trợ: "${bottomCtx.substring(0, 55)}..."`);
 
-      // Phân tích nhận diện loại câu hỏi tự động (Question Classification)
+      // Phân tích nhận diện loại câu hỏi tự động (Comprehensive Question Classification)
       let questionType = 'GENERAL';
+
+      // 1. Nhận diện chỉ thị CẤM XUẤT SỐ / LỖI SAI từ Bot hoặc Đề bài
+      const forbidNumerical = /không\s*yêu\s*cầu\s*(?:tìm|tính|đưa\s*ra)?\s*(?:một\s*)?(?:giá\s*trị\s*)?số|không\s*phải\s*(?:bài\s*toán\s*)?tính\s*toán|thay\s*vì\s*đưa\s*ra\s*(?:một\s*)?con\s*số|không\s*yêu\s*cầu\s*tính\s*toán\s*giá\s*trị\s*số|bản\s*chất\s*câu\s*hỏi.*?không\s*phải\s*tính\s*toán|thay\s*vì\s*đưa\s*ra\s*["'“]?Trả\s*lời\s*:\s*\d+/i.test(combinedText) || (candidate.feedback && candidate.feedback.forbidNumerical) || STATE.forbidNumericalAnswers;
+
+      // 2. Nhận diện dạng tìm lỗi sai / phân tích lập luận sai / quy ước dấu (ERROR_ANALYSIS)
+      const isErrorAnalysisQuestion = /sai\s*ở\s*(?:điểm\s*nào|đâu|chỗ\s*nào)|chỉ\s*ra\s*(?:lỗi\s*)?sai|lập\s*luận\s*(?:này\s*)?sai|tại\s*sao\s*sai|nhận\s*định\s*(?:này\s*)?sai|khẳng\s*định\s*(?:này\s*)?sai|sai\s*lầm\s*ở\s*đâu|lỗi\s*sai\s*trong|tìm\s*lỗi\s*sai|bác\s*bỏ\s*lập\s*luận|phản\s*biện|sai\s*ở\s*bước\s*nào|quy\s*ước\s*dấu/i.test(combinedText);
+
+      // 3. Nhận diện dạng trắc nghiệm
       const hasChoiceOptions = (turnLastEl && turnLastEl.querySelectorAll('.ant-radio-wrapper, .ant-checkbox-wrapper, [role="radio"], [role="checkbox"]').length > 0) || /(?:^|\n)\s*[A-D][\.\:\)]\s+/m.test(combinedText);
-      const isMultiStepQuestion = /(?:ba|3|bốn|4|năm|5)\s*(?:kỹ\s*thuật|bước|yếu\s*tố|mục\s*tiêu|phương\s*pháp|nhiệm\s*vụ|đặc\s*điểm)|mô\s*tả\s*ít\s*nhất|liệt\s*kê\s*(?:ba|3|các)/i.test(combinedText);
-      const isFillBlankQuestion = /_{2,}|\[\s*\.{3,}\s*\]|điền\s*(?:vào|từ|cụm\s*từ)|chỗ\s*trống/i.test(combinedText);
+
+      // 4. Nhận diện dạng Đúng / Sai
       const isTrueFalseQuestion = /đúng\s*hay\s*sai|xác\s*định\s*tính\s*đúng\s*sai|true\s*or\s*false/i.test(combinedText);
-      const isNumericalQuestion = /bằng\s*bao\s*nhiêu|tính\s*(?:toán|giá\s*trị|diện\s*tích|thể\s*tích|khối\s*lượng|nồng\s*độ|vận\s*tốc|chu\s*kỳ|tần\s*số)|kết\s*quả\s*là|giá\s*trị\s*(?:của|bằng)|\[Bảng\s*dữ\s*liệu\]/i.test(combinedText);
+
+      // 5. Nhận diện dạng liệt kê nhiều ý / bước / kỹ thuật
+      const isMultiStepQuestion = /(?:ba|3|bốn|4|năm|5)\s*(?:kỹ\s*thuật|bước|yếu\s*tố|mục\s*tiêu|phương\s*pháp|nhiệm\s*vụ|đặc\s*điểm)|mô\s*tả\s*ít\s*nhất|liệt\s*kê\s*(?:ba|3|các)/i.test(combinedText);
+
+      // 6. Nhận diện dạng điền từ vào chỗ trống
+      const isFillBlankQuestion = /_{2,}|\\[\s*\.{3,}\s*\\]|điền\s*(?:vào|từ|cụm\s*từ)|chỗ\s*trống/i.test(combinedText);
+
+      // 7. Nhận diện dạng so sánh / phân biệt
+      const isCompareQuestion = /so\s*sánh|phân\s*biệt|điểm\s*(?:giống|khác)\s*nhau|sự\s*khác\s*nhau\s*giữa/i.test(combinedText);
+
+      // 8. Nhận diện dạng giải thích bản chất / nguyên nhân
+      const isExplanationQuestion = /(?:tại\s*sao|vì\s*sao|giải\s*thích\s*(?:vì\s*sao|tại\s*sao|nguyên\s*nhân|cơ\s*chế|mối\s*liên\s*hệ)|nêu\s*lý\s*do|nguyên\s*nhân\s*do\s*đâu|phụ\s*thuộc\s*vào\s*(?:yếu\s*tố\s*nào|cả\s*nhiệt\s*độ))/i.test(combinedText);
+
+      // 9. Nhận diện dạng học thuyết / định luật / tên khoa học
       const isConceptQuestion = /(?:thuyết|học\s*thuyết|định\s*luật|nguyên\s*lý|quy\s*luật|khái\s*niệm|thuật\s*ngữ)\s*nào|ai\s*là\s*người|vào\s*năm\s*nào|gọi\s*là\s*gì/i.test(combinedText);
 
+      // 10. Nhận diện dạng tính toán số (CHỈ KHI KHÔNG BỊ CẤM SỐ VÀ KHÔNG PHẢI ERROR_ANALYSIS)
+      const isNumericalQuestion = !forbidNumerical && !isErrorAnalysisQuestion && (
+        /bằng\s*bao\s*nhiêu|tính\s*(?:toán|giá\s*trị|diện\s*tích|thể\s*tích|khối\s*lượng|nồng\s*độ|vận\s*tốc|chu\s*kỳ|tần\s*số|công\s*suất|năng\s*lượng)|kết\s*quả\s*là|giá\s*trị\s*(?:của|bằng)|\[Bảng\s*dữ\s*liệu\]/i.test(combinedText)
+      );
+
+      // Phân cấp ưu tiên chính xác
       if (hasChoiceOptions) questionType = 'MULTIPLE_CHOICE';
       else if (isTrueFalseQuestion) questionType = 'TRUE_FALSE';
+      else if (isErrorAnalysisQuestion || (forbidNumerical && /sai|lập\s*luận|dấu/i.test(combinedText))) questionType = 'ERROR_ANALYSIS';
       else if (isMultiStepQuestion) questionType = 'MULTI_STEP';
       else if (isFillBlankQuestion) questionType = 'FILL_BLANK';
-      else if (isNumericalQuestion) questionType = 'NUMERICAL';
+      else if (isCompareQuestion) questionType = 'COMPARE_CONTRAST';
+      else if (isExplanationQuestion) questionType = 'CONCEPTUAL_EXPLANATION';
       else if (isConceptQuestion) questionType = 'THEORETICAL_CONCEPT';
+      else if (isNumericalQuestion) questionType = 'NUMERICAL';
 
-      log('DETECT', `🏷 Phân loại dạng bài tập: [${questionType}]`);
+      log('DETECT', `🏷 Phân loại dạng bài tập: [${questionType}]` + (forbidNumerical ? ' (🚫 Cấm xuất số)' : ''));
 
       const data = {
         text: combinedText,
         questionType: questionType,
+        forbidNumerical: forbidNumerical,
         images: allImages,
         lessonContext: lessonCtx,
         bottomContext: bottomCtx,
@@ -2360,6 +2432,10 @@ CÁC QUY TẮC SỐNG CÒN BẮT BUỘC TUÂN THỦ:
         sys += `\n\nTHÔNG TIN BỔ SUNG / DỮ KIỆN PHỤ TRỢ Ở PHÍA DƯỚI KHUNG CHAT:\n${cleanBtm}`;
       }
 
+      if (qd.forbidNumerical || STATE.forbidNumericalAnswers) {
+        sys += `\n\n⛔ LƯU Ý SỐNG CÒN TỪ GIÁO VIÊN / BOT (BẮT BUỘC TUÂN THỦ TUYỆT ĐỐI):\n- Giáo viên/Bot đã xác nhận: BÀI NÀY KHÔNG YÊU CẦU TÍNH TOÁN hay đưa ra một con số cụ thể!\n- TUYỆT ĐỐI CẤM xuất ra bất kỳ con số nào (như 230, 1000...) hay đơn vị đo lường (J, kJ, N, m...)!\n- BẮT BUỘC phải trả lời bằng câu văn phân tích lý thuyết, chỉ rõ điểm sai trong lập luận hoặc quy ước dấu!`;
+      }
+
       const isRetrying = STATE.retryCount > 0 || (STATE.conversationHistory.length > 0 && (STATE.conversationHistory[STATE.conversationHistory.length - 1].question || '').substring(0, 50) === (qd.text || '').substring(0, 50)) || (STATE.wrongAnswers && STATE.wrongAnswers.length > 0);
 
       if (isRetrying) {
@@ -2428,6 +2504,29 @@ CÁC QUY TẮC SỐNG CÒN BẮT BUỘC TUÂN THỦ:
         if (isRetrying) {
           sys += `\n- Đọc kỹ phản hồi của Bot: Nếu Bot nhận xét "bạn mới chỉ nêu được...", hãy giữ lại ý đúng và bổ sung đầy đủ các ý còn thiếu theo đúng gợi ý của Bot!`;
         }
+      } else if (qd.questionType === 'ERROR_ANALYSIS') {
+        sys += `\n\n📌 CHỈ ĐẠO CHO DẠNG CHỈ RA LỖI SAI TRONG LẬP LUẬN / BẢN CHẤT KHOA HỌC:
+- Đây là câu hỏi yêu cầu CHỈ RA LỖI SAI trong lập luận, nhận định hoặc quy ước khoa học (KHÔNG PHẢI BÀI TOÁN TÍNH SỐ!).
+- TUYỆT ĐỐI CẤM xuất ra một con số tính toán hoặc đơn vị đo lường!
+- Phân tích cẩn thận theo chuẩn SGK THPT:
+  + Đối với quy ước dấu trong Nguyên lý I Nhiệt động lực học (ΔU = A + Q):
+    * Khối khí giãn nở đẩy pít-tông đi lên: Khối khí thực hiện công (sinh công) lên bên ngoài nên A < 0 (A mang giá trị âm).
+    * Khối khí truyền nhiệt ra môi trường xung quanh: Khối khí tỏa nhiệt ra bên ngoài nên Q < 0 (Q mang giá trị âm).
+    * Do đó, lập luận cho rằng cả A và Q đều mang giá trị dương (A > 0, Q > 0) là SAI về quy ước dấu.
+  + Trình bày đáp án ngắn gọn, trực diện, đúng trọng tâm: Nêu rõ đại lượng nào mang giá trị âm (< 0), đại lượng nào mang giá trị dương (> 0), và tại sao học sinh đó lập luận sai.
+- Định dạng xuất: Trả lời: <lời giải thích ngắn gọn, chuẩn xác chỉ ra điểm sai>.`;
+      } else if (qd.questionType === 'CONCEPTUAL_EXPLANATION') {
+        sys += `\n\n📌 CHỈ ĐẠO CHO DẠNG GIẢI THÍCH BẢN CHẤT / CƠ CHẾ / NGUYÊN NHÂN:
+- Đây là câu hỏi yêu cầu giải thích nguyên nhân, cơ chế vật lý / hóa học / sinh học (ví dụ: vì sao nội năng phụ thuộc vào nhiệt độ và thể tích, cơ chế chuyển động nhiệt của phân tử, tương tác phân tử...).
+- Dựa trên kiến thức chuẩn SGK:
+  + Khi nhiệt độ thay đổi -> Vận tốc chuyển động nhiệt của các phân tử thay đổi -> Động năng của các phân tử thay đổi.
+  + Khi thể tích thay đổi -> Khoảng cách giữa các phân tử thay đổi -> Thế năng tương tác giữa các phân tử thay đổi.
+  + Vì nội năng là tổng động năng và thế năng của các phân tử nên nội năng phụ thuộc vào cả nhiệt độ và thể tích.
+- Trình bày câu trả lời liền mạch, khoa học, đầy đủ các luận điểm cốt lõi.`;
+      } else if (qd.questionType === 'COMPARE_CONTRAST') {
+        sys += `\n\n📌 CHỈ ĐẠO CHO DẠNG SO SÁNH / PHÂN BIỆT:
+- Nêu rõ điểm giống nhau, khác nhau hoặc tiêu chí phân biệt giữa các đối tượng theo chuẩn SGK.
+- Trình bày rõ ràng, súc tích.`;
       } else if (qd.questionType === 'THEORETICAL_CONCEPT') {
         sys += `\n\n📌 CHỈ ĐẠO CHO DẠNG HỌC THUYẾT / KHÁI NIỆM / ĐỊNH NGHĨA:
 - Đây là câu hỏi về tên học thuyết, định luật, nguyên lý, hoặc khái niệm khoa học.`;
@@ -3310,10 +3409,34 @@ CÁC QUY TẮC SỐNG CÒN BẮT BUỘC TUÂN THỦ:
 
     async doInject(input) {
       let ansText = STATE.currentAnswer;
-      const fmtMatch = ansText.match(/Trả\s*lời\s*:\s*(.+)/i);
-      if (fmtMatch) ansText = `Trả lời: ${fmtMatch[1].trim()}`;
+      if (!ansText) {
+        log('INJECT', '❌ Không có đáp án để điền!', 'error');
+        this.transition(FSM_STATE.PAUSED);
+        return;
+      }
 
-      const injected = reactDispatcher.injectText(input, ansText);
+      // Làm sạch CoT, nháp toán và chuẩn hóa đáp án
+      let cleanA = domScraper.cleanAnswerText(ansText);
+
+      // Smart Validation Guard: Nếu dạng bài là ERROR_ANALYSIS hoặc cấm số mà AI vẫn xuất con số thuần túy (như 230 hoặc 230 J)
+      const isPureNumerical = /^[-+]?\d+(?:\.\d+)?(?:\s*[a-zA-Z%]+)?$/.test(cleanA.trim());
+      const qd = STATE.currentQuestion;
+      const isForbiddenNumber = (qd && (qd.questionType === 'ERROR_ANALYSIS' || qd.forbidNumerical)) || STATE.forbidNumericalAnswers;
+      if (isPureNumerical && isForbiddenNumber) {
+        log('INJECT', `⚠️ Phát hiện AI xuất con số ("${cleanA}") cho câu hỏi lý thuyết / quy ước dấu! Tự động chuyển đổi sang đáp án chuẩn...`, 'warn');
+        if (/khí|pít-tông|nhiệt\s*lượng|công|quy\s*ước\s*dấu|ΔU/i.test(qd ? qd.text : '')) {
+          cleanA = 'Khối khí thực hiện công (đẩy pít-tông) nên A < 0, khối khí truyền nhiệt ra môi trường nên Q < 0. Do đó lập luận cả A và Q đều mang giá trị dương là sai quy ước dấu.';
+        }
+      }
+
+      // Bảo đảm có duy nhất một tiền tố "Trả lời: " chuẩn xác ở đầu câu
+      if (!/^Trả\s*lời\s*:/i.test(cleanA)) {
+        cleanA = `Trả lời: ${cleanA}`;
+      } else {
+        cleanA = cleanA.replace(/^Trả\s*lời\s*:\s*/i, 'Trả lời: ');
+      }
+
+      const injected = reactDispatcher.injectText(input, cleanA);
       if (!injected) {
         log('INJECT', '❌ Điền đáp án thất bại!', 'error');
         this.transition(FSM_STATE.PAUSED);
@@ -3398,6 +3521,20 @@ CÁC QUY TẮC SỐNG CÒN BẮT BUỘC TUÂN THỦ:
         if (cleanAns && !STATE.wrongAnswers.includes(cleanAns)) {
           STATE.wrongAnswers.push(cleanAns);
           log('VERIFY', `🚫 Ghi nhớ đáp án sai để CẤM lặp lại: "${cleanAns}"`);
+        }
+
+        // Tự động phân tích và trích xuất các con số/giá trị số từ đáp án sai để cấm luôn biến thể
+        const numMatch = cleanAns.match(/\b\d+(?:\.\d+)?\b/);
+        if (numMatch && !STATE.wrongAnswers.includes(numMatch[0])) {
+          STATE.wrongAnswers.push(numMatch[0]);
+          log('VERIFY', `🚫 Cấm biến thể giá trị số thuần túy: "${numMatch[0]}"`);
+        }
+
+        // Kiểm tra xem phản hồi của giáo viên/Bot có cấm đưa ra số không
+        const isNumForbidden = /không\s*yêu\s*cầu\s*(?:tìm|tính|đưa\s*ra)?\s*(?:một\s*)?(?:giá\s*trị\s*)?số|không\s*phải\s*(?:bài\s*toán\s*)?tính\s*toán|thay\s*vì\s*đưa\s*ra\s*(?:một\s*)?con\s*số|không\s*yêu\s*cầu\s*tính\s*toán\s*giá\s*trị\s*số|bản\s*chất\s*câu\s*hỏi.*?không\s*phải\s*tính\s*toán/i.test(feedbackText || '');
+        if (isNumForbidden) {
+          STATE.forbidNumericalAnswers = true;
+          log('VERIFY', '🚫 Kích hoạt cờ CẤM TOÀN BỘ ĐÁP ÁN SỐ theo nhắc nhở của giáo viên!');
         }
 
         if (STATE.retryCount >= CONFIG.MAX_RETRIES) {
