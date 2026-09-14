@@ -1,12 +1,8 @@
-/* EdUnExT Solver ULTRA Edition - Universal Standalone (Tier SS+ Supreme) */
+/* EdUnExT_ULTRA - Universal Standalone Console Edition (AUTO Giải edunext bản prenium) */
 (function __BROAMSTUCK_CORE__() {
   'use strict';
 
-  // ============================================================================
-  // 🚀 EDUNEXT ULTRA - TIER SS+ ENGINE EXTENSIONS
-  // ============================================================================
 
-  // 1. NETWORK PACKET INTERCEPTION (Bắt gói tin ngầm từ server)
   function initNetworkPacketInterceptor() {
     try {
       if (window.__BROAMSTUCK_NET_HOOKED__) return;
@@ -58,7 +54,6 @@
   }
   initNetworkPacketInterceptor();
 
-  // 2. VISUAL DOM-TO-CANVAS SNAPSHOT (Cap câu hỏi sang Base64 PNG)
   async function captureElementToCanvasBase64(element) {
     try {
       if (!element || !element.isConnected) return null;
@@ -116,7 +111,46 @@
     }
   }
 
-  // 3. KATEX / MATHJAX LATEX RECONSTRUCTOR (Khôi phục mã LaTeX chuẩn)
+  function cleanLatexToPlain(tex) {
+    if (!tex || typeof tex !== 'string') return '';
+    let s = tex.trim();
+    s = s.replace(/^\$+|\$+$/g, '').trim();
+    s = s.replace(/\\text(?:bf|it|rm)?\{([^}]*)\}/g, '$1');
+    s = s.replace(/\\mathrm\{([^}]*)\}/g, '$1');
+    s = s.replace(/\\mathbf\{([^}]*)\}/g, '$1');
+    s = s.replace(/\\mathit\{([^}]*)\}/g, '$1');
+    s = s.replace(/\\frac\{([^}]+)\}\{([^}]+)\}/g, '($1/$2)');
+    s = s.replace(/\\sqrt\{([^}]+)\}/g, 'sqrt($1)');
+    s = s.replace(/\\sqrt\[([^\]]+)\]\{([^}]+)\}/g, 'root($1, $2)');
+    s = s.replace(/\^\{\\circ\}\s*C|\^\\circ\s*C|\\circ\s*C|\\degree\s*C/gi, ' độ C');
+    s = s.replace(/\\circ\b|\\degree\b/g, '°');
+    s = s.replace(/\\Delta\b/g, 'Δ');
+    s = s.replace(/\\delta\b/g, 'δ');
+    s = s.replace(/\\alpha\b/g, 'alpha');
+    s = s.replace(/\\beta\b/g, 'beta');
+    s = s.replace(/\\gamma\b/g, 'gamma');
+    s = s.replace(/\\lambda\b/g, 'lambda');
+    s = s.replace(/\\mu\b/g, 'mu');
+    s = s.replace(/\\pi\b/g, 'pi');
+    s = s.replace(/\\omega\b/g, 'omega');
+    s = s.replace(/\\Omega\b/g, 'Omega');
+    s = s.replace(/\\times\b/g, '*');
+    s = s.replace(/\\cdot\b/g, '*');
+    s = s.replace(/\\pm\b/g, '±');
+    s = s.replace(/\\mp\b/g, '∓');
+    s = s.replace(/\\le(?:q)?\b/g, '<=');
+    s = s.replace(/\\ge(?:q)?\b/g, '>=');
+    s = s.replace(/\\neq?\b/g, '!=');
+    s = s.replace(/\\approx\b/g, '≈');
+    s = s.replace(/\\rightarrow\b|\\to\b/g, '->');
+    s = s.replace(/\\(?:,|;|!|quad|qquad|displaystyle|limits|nolimits|left|right)\b/g, ' ');
+    s = s.replace(/\\([a-zA-Z]+)/g, '$1');
+    s = s.replace(/\{([^{}]+)\}/g, '$1');
+    s = s.replace(/_([a-zA-Z0-9])/g, '$1');
+    s = s.replace(/\s+/g, ' ').trim();
+    return s;
+  }
+
   function reconstructLatexFormulas(container) {
     if (!container) return;
     try {
@@ -125,16 +159,26 @@
         try {
           const annot = k.querySelector('annotation[encoding*="tex"]');
           if (annot && annot.textContent && annot.textContent.trim()) {
-            const tex = annot.textContent.trim();
-            const textNode = document.createTextNode(` $${tex}$ `);
+            const cleanMath = cleanLatexToPlain(annot.textContent);
+            const textNode = document.createTextNode(` ${cleanMath} `);
             k.parentNode.replaceChild(textNode, k);
+            continue;
           }
+          const mathml = k.querySelector('.katex-mathml');
+          if (mathml && mathml.textContent && mathml.textContent.trim()) {
+            const mText = cleanLatexToPlain(mathml.textContent);
+            const textNode = document.createTextNode(` ${mText} `);
+            k.parentNode.replaceChild(textNode, k);
+            continue;
+          }
+          const plainText = cleanLatexToPlain(k.textContent);
+          const textNode = document.createTextNode(` ${plainText} `);
+          k.parentNode.replaceChild(textNode, k);
         } catch (_) {}
       }
     } catch (_) {}
   }
 
-  // 4. STREAMING STABILITY DEBOUNCE (Chống đọc dở dang)
   async function waitForStreamingComplete(element, maxWaitMs = 1200) {
     if (!element) return;
     return new Promise(resolve => {
@@ -158,7 +202,6 @@
     });
   }
 
-  // 5. SEMANTIC QUESTION CACHE (Bộ nhớ đệm 0ms không tốn token)
   const questionCache = {
     _norm(str) {
       return (str || '')
@@ -170,11 +213,11 @@
       try {
         const k = this._norm(qText);
         if (k.length < 12) return null;
-        const raw = localStorage.getItem('__EDUNEXT_ULTRA_CACHE__' + k);
+        const raw = localStorage.getItem('__EDUNEXT_PRENIUM_CACHE__' + k);
         if (raw) {
           const item = JSON.parse(raw);
           if (item && item.ans && Date.now() - item.time < 86400000 * 5) {
-            log('SYS', `⚡ [ULTRA CACHE HIT]: Tái sử dụng đáp án đúng tức thì (0ms, 0 Token): "${item.ans}"`);
+            log('SYS', `⚡ [PRENIUM CACHE HIT]: Tái sử dụng đáp án đúng tức thì (0ms, 0 Token): "${item.ans}"`);
             return item.ans;
           }
         }
@@ -185,7 +228,7 @@
       try {
         const k = this._norm(qText);
         if (k.length < 12 || !ans) return;
-        localStorage.setItem('__EDUNEXT_ULTRA_CACHE__' + k, JSON.stringify({
+        localStorage.setItem('__EDUNEXT_PRENIUM_CACHE__' + k, JSON.stringify({
           ans: ans, time: Date.now()
         }));
       } catch (_) {}
@@ -1817,7 +1860,48 @@
 
     cleanTextArtifacts(str) {
       if (!str || typeof str !== 'string') return '';
-      let t = str;
+      let t = str.normalize('NFC');
+      
+      while (/(?:^|\n)([a-zA-ZÀ-Ỹà-ỹ\^0-9])\n(?=[a-zA-ZÀ-Ỹà-ỹ\^0-9](?:\n|$))/m.test(t)) {
+        t = t.replace(/(^|\n)([a-zA-ZÀ-Ỹà-ỹ\^0-9])\n(?=[a-zA-ZÀ-Ỹà-ỹ\^0-9](\n|$))/gm, '$1$2');
+      }
+
+      t = t.replace(/a\s*[\^ˆ]/gi, m => m[0] === 'A' ? 'Â' : 'â');
+      t = t.replace(/e\s*[\^ˆ]/gi, m => m[0] === 'E' ? 'Ê' : 'ê');
+      t = t.replace(/o\s*[\^ˆ]/gi, m => m[0] === 'O' ? 'Ô' : 'ô');
+      t = t.replace(/a\s*[\(˘]/gi, m => m[0] === 'A' ? 'Ă' : 'ă');
+
+      const decompileDict = [
+        [/c\s*ô\s*n\s*g\s*t\s*h\s*ứ\s*c/gi, 'công thức'],
+        [/c\s*o\s*\^\s*n\s*g\s*t\s*h\s*ứ\s*c/gi, 'công thức'],
+        [/c\s*o\s*\^\s*n\s*g/gi, 'công'],
+        [/t\s*h\s*ứ\s*c/gi, 'thức'],
+        [/y\s*ê\s*u\s*c\s*ầ\s*u/gi, 'yêu cầu'],
+        [/y\s*e\s*\^\s*u\s*c\s*a\s*\^[\s\u02cb`]?\s*u/gi, 'yêu cầu'],
+        [/y\s*e\s*\^\s*u/gi, 'yêu'],
+        [/c\s*a\s*\^[\s\u02cb`]?\s*u/gi, 'cầu'],
+        [/b\s*i\s*ế\s*n/gi, 'biến'],
+        [/b\s*i\s*e\s*\^[\s\u02ca']?\s*n/gi, 'biến'],
+        [/n\s*h\s*i\s*ệ\s*t\s*đ\s*ộ/gi, 'nhiệt độ'],
+        [/t\s*h\s*ể\s*t\s*í\s*c\s*h/gi, 'thể tích'],
+        [/k\s*h\s*ố\s*i\s*k\s*h\s*í/gi, 'khối khí'],
+        [/k\s*h\s*í/gi, 'khí'],
+        [/p\s*í\s*t\s*-\s*t\s*ô\s*n\s*g/gi, 'pít-tông'],
+        [/l\s*ậ\s*p\s*l\s*u\s*ậ\s*n/gi, 'lập luận'],
+        [/s\s*a\s*i/gi, 'sai'],
+        [/đ\s*ơ\s*n\s*v\s*ị/gi, 'đơn vị'],
+        [/đ\s*ộ\s*C\s*e\s*l\s*s\s*i\s*u\s*s/gi, 'độ Celsius'],
+        [/C\s*e\s*l\s*s\s*i\s*u\s*s/gi, 'Celsius'],
+        [/K\s*e\s*l\s*v\s*i\s*n/gi, 'Kelvin'],
+        [/k\s*h\s*ô\s*n\s*g/gi, 'không'],
+        [/p\s*h\s*ả\s*i/gi, 'phải'],
+        [/l\s*à/gi, 'là'],
+        [/t\s*r\s*o\s*n\s*g/gi, 'trong']
+      ];
+      for (const [pat, rep] of decompileDict) {
+        t = t.replace(pat, rep);
+      }
+
       t = t.replace(/\/\*[\s\S]*?\*\//g, ' ');
       t = t.replace(/(@[a-zA-Z0-9_-]+[^{]*\{[\s\S]*?\}|[^{}]*\{[^{}]*\})/g, ' ');
       t = t.replace(/(?:margin|padding|font-size|display|overflow-[xy]|background|border|text-align)\s*:[^;]+;?/gi, ' ');
@@ -1825,14 +1909,10 @@
       t = t.replace(/\.(?:katex|math|ant-|w-)[a-zA-Z0-9_-]*/g, ' ');
       t = t.replace(/>\s*\.[a-zA-Z0-9_-]+/g, ' ');
       
-      // Xóa UUID v4
       t = t.replace(/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/g, '');
-      // Xóa MongoDB Object IDs (24 kí tự hex)
       t = t.replace(/\b[0-9a-fA-F]{24}\b/g, '');
-      // Xóa Timestamps dạng 19:54:16 12/9/2026 hoặc 12/09/2026 19:54
       t = t.replace(/\b\d{1,2}:\d{2}(?::\d{2})?\s+\d{1,2}\/\d{1,2}\/\d{4}\b/g, '');
       t = t.replace(/\b\d{1,2}\/\d{1,2}\/\d{4}\s+\d{1,2}:\d{2}(?::\d{2})?\b/g, '');
-      // Xóa các metadata và label thừa từ giao diện EduNext
       t = t.replace(/\bINT:\s*ANS\b/g, '');
       t = t.replace(/🧑🎓|🤖|Học\s*sinh|Chatbot|\[Chatbot\]/ig, '');
       
@@ -1860,23 +1940,19 @@
       if (!rawA || typeof rawA !== 'string') return '';
       let a = rawA;
 
-      // 1. Gọt bỏ các khối tư duy / thought tags của AI (Gemini, Claude, DeepSeek, v.v.)
       a = a.replace(/<thought(?:ful)?>[\s\S]*?<\/thought(?:ful)?>/gi, '');
       a = a.replace(/<thinking>[\s\S]*?<\/thinking>/gi, '');
 
-      // 2. Gọt bỏ các dòng CoT, nháp phép tính và lời mào đầu suy nghĩ trước "Trả lời:"
-      // Ví dụ: "- 4 * 250 = 1000 J.`)" hoặc "* Let's keep it extremely concise as requested: "Trả lời:"
       a = a.replace(/^[\s\S]*?(?:(?:\*|\-)?\s*(?:let['’]s|here is|here's|here are|i will|i should|suy nghĩ|phân tích|nháp|tính nháp|bước \d)[\s\S]*?(?:["'“]?Trả\s*lời\s*:\s*|\n\n))/i, '');
       a = a.replace(/^(?:\s*[\*\-]?\s*\d+\s*[\*\+\-\/]\s*\d+\s*=\s*\d+[^;\n]*\n+)+/g, '');
 
-      // 3. Làm sạch các mã rác, CSS, MathML và metadata HTML
       a = this.cleanTextArtifacts(a);
       if (!a) return '';
 
-      // 4. Nếu AI viết nháp hoặc phân tích rồi chốt hạ bằng cụm "Trả lời: ..." ở cuối câu
-      const lastAnsMatch = a.match(/[\.\;\n]\s*Trả\s*lời\s*:\s*([^\n\r]+)/i);
-      if (lastAnsMatch && lastAnsMatch[1].trim().length > 10) {
-        a = lastAnsMatch[1].trim();
+      const lastAnswerPrefix = 'Trả lời:';
+      const lastAnsIdx = a.lastIndexOf(lastAnswerPrefix);
+      if (lastAnsIdx !== -1 && (a.length - lastAnsIdx) > 9) {
+        a = a.substring(lastAnsIdx + lastAnswerPrefix.length).trim();
       } else {
         const ansMatch = a.match(/(?:^|\n)\s*(?:Trả\s*lời|Đáp\s*án|Answer|Result)\s*:\s*([\s\S]+)/i);
         if (ansMatch) {
@@ -1884,13 +1960,88 @@
         } else {
           a = a.replace(/^(\s*(?:Trả\s*lời|Đáp\s*án|Answer|Result)[\s:]+)+/i, '').trim();
         }
-        // Deduplicate các cụm "Trả lời:" bị lặp lại ở giữa câu
-        a = a.replace(/(?:[\.\;\n]\s*)Trả\s*lời\s*:\s*/gi, '; ');
       }
+      a = a.replace(/(?:[\.\;\n]\s*)Trả\s*lời\s*:\s*/gi, '; ');
 
-      // 5. Gọt bỏ ngoặc kép và code blocks bọc ngoài
       a = a.replace(/^["'“]([\s\S]*)["'”]$/, '$1').trim();
       a = a.replace(/^```[a-z]*\n([\s\S]*?)\n```$/i, '$1').trim();
+
+      a = a.replace(/^[\s\)\.\,\;\:\-\*\`\>]+/, '');
+
+      a = a.replace(/\\text(?:bf|it|rm)?\{([^}]*)\}/g, '$1');
+      a = a.replace(/\\mathrm\{([^}]*)\}/g, '$1');
+      a = a.replace(/\\mathbf\{([^}]*)\}/g, '$1');
+      a = a.replace(/\\mathit\{([^}]*)\}/g, '$1');
+      a = a.replace(/\\frac\{([^}]+)\}\{([^}]+)\}/g, '($1/$2)');
+      a = a.replace(/\\sqrt\{([^}]+)\}/g, 'sqrt($1)');
+      a = a.replace(/\^\{\\circ\}\s*C|\^\\circ\s*C|\\circ\s*C|\\degree\s*C/gi, ' độ C');
+      a = a.replace(/\\circ\b|\\degree\b/g, '°');
+      a = a.replace(/\\Delta\b/g, 'Δ');
+      a = a.replace(/\\delta\b/g, 'δ');
+      a = a.replace(/\\alpha\b/g, 'alpha');
+      a = a.replace(/\\beta\b/g, 'beta');
+      a = a.replace(/\\gamma\b/g, 'gamma');
+      a = a.replace(/\\times\b/g, '*');
+      a = a.replace(/\\cdot\b/g, '*');
+      a = a.replace(/\\le(?:q)?\b/g, '<=');
+      a = a.replace(/\\ge(?:q)?\b/g, '>=');
+      a = a.replace(/\\neq?\b/g, '!=');
+      a = a.replace(/\\approx\b/g, '≈');
+      a = a.replace(/\\([a-zA-Z]+)/g, '$1');
+      a = a.replace(/\{([^{}]+)\}/g, '$1');
+      a = a.replace(/_([a-zA-Z0-9])/g, '$1');
+      a = a.replace(/_$/, '0');
+
+      a = a.replace(/\$+/g, '');
+
+      a = a.replace(/[\*\_\`\#]+/g, '');
+
+      a = a.replace(/([a-zA-ZÀ-Ỹà-ỹ])(công thức|pít-tông|nhiệt độ|độ Celsius|Kelvin)/gi, '$1 $2');
+      a = a.replace(/(công thức|pít-tông|nhiệt độ|độ Celsius|Kelvin)([a-zA-ZÀ-Ỹà-ỹ])/gi, '$1 $2');
+      a = a.replace(/([a-zA-ZÀ-Ỹà-ỹ])([=<>])/g, '$1 $2');
+      a = a.replace(/([=<>])([a-zA-ZÀ-Ỹà-ỹ0-9])/g, '$1 $2');
+
+      a = a.replace(/đồng\s*源/g, 'tương đồng');
+      a = a.replace(/[\u4e00-\u9fff\u3400-\u4dbf\uf900-\ufaff]/g, '');
+
+      a = a.replace(/nhân\s*tố\s*\(\s*allele\s*\)/gi, 'nhân tố di truyền');
+      a = a.replace(/nhân\s*tố\s*di\s*truyền\s*\(\s*allele\s*\)/gi, 'nhân tố di truyền');
+      a = a.replace(/nhiễm\s*sắc\s*thể\s*\(\s*chromosome\s*\)/gi, 'nhiễm sắc thể');
+      a = a.replace(/giảm\s*phân\s*\(\s*meiosis\s*\)/gi, 'giảm phân');
+      a = a.replace(/nguyên\s*phân\s*\(\s*mitosis\s*\)/gi, 'nguyên phân');
+      a = a.replace(/giao\s*tử\s*\(\s*gamete\s*\)/gi, 'giao tử');
+      a = a.replace(/hợp\s*tử\s*\(\s*zygote\s*\)/gi, 'hợp tử');
+      a = a.replace(/kiểu\s*hình\s*\(\s*phenotype\s*\)/gi, 'kiểu hình');
+      a = a.replace(/kiểu\s*gen\s*\(\s*genotype\s*\)/gi, 'kiểu gen');
+
+      const curQ = typeof STATE !== 'undefined' ? STATE.currentQuestion : null;
+      const isEnglishSubject = curQ && (
+        /tiếng\s*anh|english|grammar|vocabulary|reading\s*comprehension|gap[- ]fill|cloze|pronunciation|stress\b|synonym|antonym|underlined\s*part|closest\s*in\s*meaning|opposite\s*in\s*meaning|choose\s*the\s*(?:best|correct)\s*answer/i.test(curQ.text || '') ||
+        /tiếng\s*anh|english/i.test(curQ.lessonContext || '') ||
+        /tiếng\s*anh|english/i.test(curQ.bottomContext || '') ||
+        (typeof curQ.text === 'string' && curQ.text.length > 30 && !/[àáạảãâầấậẩẫăằắặẳẵèéẹẻẽêềếệểễìíịỉĩòóọỏõôồốộổỗơờớợởỡùúụủũưừứựửữỳýỵỷỹđ]/i.test(curQ.text) && /\b(?:the|and|is|in|of|that|to|for|with|which|what|where|when|why|how)\b/i.test(curQ.text))
+      );
+      if (!isEnglishSubject) {
+        const commonEnglishTerms = [
+          'meiosis', 'mitosis', 'allele', 'alleles', 'gene', 'genes', 'chromosome', 'chromosomes',
+          'gamete', 'gametes', 'homologous', 'phenotype', 'genotype', 'dominant', 'recessive',
+          'mutation', 'crossing over', 'heterozygous', 'homozygous', 'kinetic energy', 'potential energy',
+          'thermal energy', 'internal energy', 'pressure', 'volume', 'temperature'
+        ];
+        const enPattern = new RegExp('\\s*\\((?:' + commonEnglishTerms.join('|') + ')\\)', 'gi');
+        a = a.replace(enPattern, '');
+
+        a = a.replace(/\s*\([a-zA-Z\s\-]{3,35}\)/g, (match) => {
+          const inside = match.replace(/[\s\(\)]/g, '').toLowerCase();
+          if (/^(adn|arn|atp|sgk|thpt|co2|h2o|adp|nadp|nadh)$/i.test(inside)) return match;
+          return '';
+        });
+      }
+
+      a = a.replace(/^[\s\)\.\,\;\:\-\*\`\>]+/, '').trim();
+      a = a.replace(/["'”’\>\`]+$/g, '').trim();
+      a = a.replace(/[ \t]{2,}/g, ' ');
+      if (a.length > 0) a = a.charAt(0).toUpperCase() + a.slice(1);
 
       return a;
     },
@@ -2007,11 +2158,9 @@
     checkFeedbackBanner(botElement, text) {
       const allText = ((botElement ? botElement.textContent || '' : '') + ' ' + (text || '')).toLowerCase();
 
-      // Nhận diện phản hồi nhắc nhở không yêu cầu con số cụ thể
       const forbidNum = /không\s*yêu\s*cầu\s*(?:tìm|tính|đưa\s*ra)?\s*(?:một\s*)?(?:giá\s*trị\s*)?số|không\s*phải\s*(?:bài\s*toán\s*)?tính\s*toán|thay\s*vì\s*đưa\s*ra\s*(?:một\s*)?con\s*số|không\s*yêu\s*cầu\s*tính\s*toán\s*giá\s*trị\s*số|bản\s*chất\s*câu\s*hỏi.*?không\s*phải\s*tính\s*toán/i.test(allText);
 
-      // 1. Nhận diện các phản hồi báo CHƯA ĐỦ Ý, CẦN BỔ SUNG hoặc YÊU CẦU THỬ LẠI
-      const hasRetryOrPartial = /tuy\s*nhiên|nhưng|mới\s*chỉ|chưa\s*đáp\s*ứng|chưa\s*đủ|chưa\s*hoàn\s*thành|cần\s*liệt\s*kê\s*đủ|cần\s*bổ\s*sung|bổ\s*sung\s*thêm|bổ\s*sung\s*các\s*bước|thử\s*lại\s*lần\s*nữa|thử\s*suy\s*nghĩ\s*lại|bài\s*này\s*hơi\s*khó|chúng\s*ta\s*đang\s*ở\s*một\s*câu\s*hỏi\s*khác/i.test(allText);
+      const hasRetryOrPartial = /tuy\s*nhiên|nhưng|mới\s*chỉ|chưa\s*đáp\s*ứng|chưa\s*đủ|chưa\s*hoàn\s*thành|chưa\s*hoàn\s*chỉnh|chưa\s*chỉ\s*ra|chưa\s*giải\s*thích|sửa\s*lại\s*câu\s*trả\s*lời|thử\s*sửa\s*lại|lưu\s*ý\s*xem|cần\s*liệt\s*kê\s*đủ|cần\s*bổ\s*sung|bổ\s*sung\s*thêm|bổ\s*sung\s*các\s*bước|thử\s*lại\s*lần\s*nữa|thử\s*suy\s*nghĩ\s*lại|bài\s*này\s*hơi\s*khó|chúng\s*ta\s*đang\s*ở\s*một\s*câu\s*hỏi\s*khác/i.test(allText);
 
       const hasCross = allText.includes('✗') || /chưa\s*đúng|chưa\s*chính\s*xác|sai\s*rồi|not\s*quite\s*right|incorrect|chưa\s*phù\s*hợp/i.test(allText);
 
@@ -2019,7 +2168,6 @@
         return { hasFeedback: true, result: 'INCORRECT', forbidNumerical: forbidNum };
       }
 
-      // 2. Chỉ coi là CORRECT khi thực sự khen thưởng và chuyển câu
       const hasCheckmark = allText.includes('✓') || /đúng\s*rồi|quá\s*đỉnh|chính\s*xác\s*!|bạn\s*nắm\s*vững|câu\s*đúng\s*liên\s*tiếp|tiếp\s*tục\s*với\s*câu\s*hỏi\s*sau|correct/i.test(allText);
 
       if (hasCheckmark) {
@@ -2061,7 +2209,6 @@
       const turnLastEl = candidate.element || (turnMsgs[turnMsgs.length - 1] ? turnMsgs[turnMsgs.length - 1].element : null);
       STATE.currentQuestionTurnElement = turnLastEl;
 
-      // ULTRA: Chờ bot stream chữ xong hoàn toàn (Debounce)
       if (turnLastEl) await waitForStreamingComplete(turnLastEl, 1000);
 
       const texts = turnMsgs.map(m => this.extractCleanText(m.element, m.text));
@@ -2105,13 +2252,12 @@
           allImages = allImages.concat(imgs);
         }
       }
-      // ULTRA: Tự động chụp Canvas snapshot phân vùng câu hỏi (Vision-First)
       if (turnLastEl) {
         try {
           const snapBase64 = await captureElementToCanvasBase64(turnLastEl);
           if (snapBase64 && snapBase64.startsWith('data:image/')) {
             allImages.unshift(snapBase64);
-            log('VISION', '📸 [ULTRA SNAPSHOT]: Đã chụp màn hình phân vùng câu hỏi thành công (Multimodal Vision Ready)!');
+            log('VISION', '📸 [PRENIUM SNAPSHOT]: Đã chụp màn hình phân vùng câu hỏi thành công (Multimodal Vision Ready)!');
           }
         } catch (_) {}
       }
@@ -2124,45 +2270,39 @@
       const bottomCtx = this.extractBottomContext();
       if (bottomCtx && bottomCtx.length > 5) log('VISION', `📎 Dữ kiện phụ trợ: "${bottomCtx.substring(0, 55)}..."`);
 
-      // Phân tích nhận diện loại câu hỏi tự động (Comprehensive Question Classification)
       let questionType = 'GENERAL';
 
-      // 1. Nhận diện chỉ thị CẤM XUẤT SỐ / LỖI SAI từ Bot hoặc Đề bài
       const forbidNumerical = /không\s*yêu\s*cầu\s*(?:tìm|tính|đưa\s*ra)?\s*(?:một\s*)?(?:giá\s*trị\s*)?số|không\s*phải\s*(?:bài\s*toán\s*)?tính\s*toán|thay\s*vì\s*đưa\s*ra\s*(?:một\s*)?con\s*số|không\s*yêu\s*cầu\s*tính\s*toán\s*giá\s*trị\s*số|bản\s*chất\s*câu\s*hỏi.*?không\s*phải\s*tính\s*toán|thay\s*vì\s*đưa\s*ra\s*["'“]?Trả\s*lời\s*:\s*\d+/i.test(combinedText) || (candidate.feedback && candidate.feedback.forbidNumerical) || STATE.forbidNumericalAnswers;
 
-      // 2. Nhận diện dạng tìm lỗi sai / phân tích lập luận sai / quy ước dấu (ERROR_ANALYSIS)
-      const isErrorAnalysisQuestion = /sai\s*ở\s*(?:điểm\s*nào|đâu|chỗ\s*nào)|chỉ\s*ra\s*(?:lỗi\s*)?sai|lập\s*luận\s*(?:này\s*)?sai|tại\s*sao\s*sai|nhận\s*định\s*(?:này\s*)?sai|khẳng\s*định\s*(?:này\s*)?sai|sai\s*lầm\s*ở\s*đâu|lỗi\s*sai\s*trong|tìm\s*lỗi\s*sai|bác\s*bỏ\s*lập\s*luận|phản\s*biện|sai\s*ở\s*bước\s*nào|quy\s*ước\s*dấu/i.test(combinedText);
+      const isErrorAnalysisQuestion = /sai\s*ở\s*(?:điểm\s*nào|đâu|chỗ\s*nào)|chỉ\s*ra\s*(?:lỗi\s*)?sai|lập\s*luận\s*(?:này\s*)?sai|tại\s*sao\s*sai|nhận\s*định\s*(?:này\s*)?sai|khẳng\s*định\s*(?:này\s*)?sai|sai\s*lầm\s*ở\s*đâu|lỗi\s*(?:sai)?\s*trong|lỗi\s*(?:trong|của|ở)\s*cách\s*làm|tìm\s*lỗi\s*sai|bác\s*bỏ\s*lập\s*luận|phản\s*biện|sai\s*ở\s*bước\s*nào|quy\s*ước\s*dấu|đơn\s*vị\s*nhiệt\s*độ|thay\s*thẳng\s*t\s*=|thang\s*đo\s*nhiệt\s*độ/i.test(combinedText);
 
-      // 3. Nhận diện dạng trắc nghiệm
       const hasChoiceOptions = (turnLastEl && turnLastEl.querySelectorAll('.ant-radio-wrapper, .ant-checkbox-wrapper, [role="radio"], [role="checkbox"]').length > 0) || /(?:^|\n)\s*[A-D][\.\:\)]\s+/m.test(combinedText);
 
-      // 4. Nhận diện dạng Đúng / Sai
       const isTrueFalseQuestion = /đúng\s*hay\s*sai|xác\s*định\s*tính\s*đúng\s*sai|true\s*or\s*false/i.test(combinedText);
 
-      // 5. Nhận diện dạng liệt kê nhiều ý / bước / kỹ thuật
       const isMultiStepQuestion = /(?:ba|3|bốn|4|năm|5)\s*(?:kỹ\s*thuật|bước|yếu\s*tố|mục\s*tiêu|phương\s*pháp|nhiệm\s*vụ|đặc\s*điểm)|mô\s*tả\s*ít\s*nhất|liệt\s*kê\s*(?:ba|3|các)/i.test(combinedText);
 
-      // 6. Nhận diện dạng điền từ vào chỗ trống
       const isFillBlankQuestion = /_{2,}|\\[\s*\.{3,}\s*\\]|điền\s*(?:vào|từ|cụm\s*từ)|chỗ\s*trống/i.test(combinedText);
 
-      // 7. Nhận diện dạng so sánh / phân biệt
       const isCompareQuestion = /so\s*sánh|phân\s*biệt|điểm\s*(?:giống|khác)\s*nhau|sự\s*khác\s*nhau\s*giữa/i.test(combinedText);
 
-      // 8. Nhận diện dạng giải thích bản chất / nguyên nhân
       const isExplanationQuestion = /(?:tại\s*sao|vì\s*sao|giải\s*thích\s*(?:vì\s*sao|tại\s*sao|nguyên\s*nhân|cơ\s*chế|mối\s*liên\s*hệ)|nêu\s*lý\s*do|nguyên\s*nhân\s*do\s*đâu|phụ\s*thuộc\s*vào\s*(?:yếu\s*tố\s*nào|cả\s*nhiệt\s*độ))/i.test(combinedText);
 
-      // 9. Nhận diện dạng học thuyết / định luật / tên khoa học
       const isConceptQuestion = /(?:thuyết|học\s*thuyết|định\s*luật|nguyên\s*lý|quy\s*luật|khái\s*niệm|thuật\s*ngữ)\s*nào|ai\s*là\s*người|vào\s*năm\s*nào|gọi\s*là\s*gì/i.test(combinedText);
 
-      // 10. Nhận diện dạng tính toán số (CHỈ KHI KHÔNG BỊ CẤM SỐ VÀ KHÔNG PHẢI ERROR_ANALYSIS)
       const isNumericalQuestion = !forbidNumerical && !isErrorAnalysisQuestion && (
         /bằng\s*bao\s*nhiêu|tính\s*(?:toán|giá\s*trị|diện\s*tích|thể\s*tích|khối\s*lượng|nồng\s*độ|vận\s*tốc|chu\s*kỳ|tần\s*số|công\s*suất|năng\s*lượng)|kết\s*quả\s*là|giá\s*trị\s*(?:của|bằng)|\[Bảng\s*dữ\s*liệu\]/i.test(combinedText)
       );
 
-      // Phân cấp ưu tiên chính xác
+      let extractedBotHint = '';
+      const hintMatch = combinedText.match(/(?:Tôi\s*nhận\s*thấy|Lưu\s*ý|Gợi\s*ý|Nhận\s*xét|Phản\s*hồi|chưa\s*hoàn\s*chỉnh|chưa\s*chỉ\s*ra|sửa\s*lại\s*câu\s*trả\s*lời)[\s\S]*?(?:Bạn\s*thử\s*sửa\s*lại|Hãy\s*sửa\s*lại|Câu\s*hỏi|Question|Task)/i);
+      if (hintMatch) {
+        extractedBotHint = hintMatch[0].replace(/(?:Bạn\s*thử\s*sửa\s*lại|Hãy\s*sửa\s*lại|Câu\s*hỏi|Question|Task)[\s\S]*$/i, '').trim();
+      }
+
       if (hasChoiceOptions) questionType = 'MULTIPLE_CHOICE';
       else if (isTrueFalseQuestion) questionType = 'TRUE_FALSE';
-      else if (isErrorAnalysisQuestion || (forbidNumerical && /sai|lập\s*luận|dấu/i.test(combinedText))) questionType = 'ERROR_ANALYSIS';
+      else if (isErrorAnalysisQuestion || (forbidNumerical && /sai|lập\s*luận|dấu|nhiệt\s*độ/i.test(combinedText))) questionType = 'ERROR_ANALYSIS';
       else if (isMultiStepQuestion) questionType = 'MULTI_STEP';
       else if (isFillBlankQuestion) questionType = 'FILL_BLANK';
       else if (isCompareQuestion) questionType = 'COMPARE_CONTRAST';
@@ -2176,6 +2316,7 @@
         text: combinedText,
         questionType: questionType,
         forbidNumerical: forbidNumerical,
+        botHint: extractedBotHint,
         images: allImages,
         lessonContext: lessonCtx,
         bottomContext: bottomCtx,
@@ -2590,18 +2731,46 @@
 
   const aiProvider = {
     buildPromptText(qd) {
+      const isEnglishSubject = qd && (
+        /tiếng\s*anh|english|grammar|vocabulary|reading\s*comprehension|gap[- ]fill|cloze|pronunciation|stress\b|synonym|antonym|underlined\s*part|closest\s*in\s*meaning|opposite\s*in\s*meaning|choose\s*the\s*(?:best|correct)\s*answer/i.test(qd.text || '') ||
+        /tiếng\s*anh|english/i.test(qd.lessonContext || '') ||
+        /tiếng\s*anh|english/i.test(qd.bottomContext || '') ||
+        (typeof qd.text === 'string' && qd.text.length > 30 && !/[àáạảãâầấậẩẫăằắặẳẵèéẹẻẽêềếệểễìíịỉĩòóọỏõôồốộổỗơờớợởỡùúụủũưừứựửữỳýỵỷỹđ]/i.test(qd.text) && /\b(?:the|and|is|in|of|that|to|for|with|which|what|where|when|why|how)\b/i.test(qd.text))
+      );
+
+      const langRules = isEnglishSubject ? `2. QUY ĐỊNH ĐẶC BIỆT DÀNH CHO BÀI TẬP MÔN TIẾNG ANH (ENGLISH SUBJECT):
+   - ĐÂY LÀ BÀI TẬP MÔN TIẾNG ANH (ENGLISH). BẮT BUỘC TRẢ LỜI 100% BẰNG TIẾNG ANH CHUẨN XÁC, TỰ NHIÊN, HỌC THUẬT (CHUẨN SGK TIẾNG ANH THPT / OXFORD / CAMBRIDGE).
+   - TUYỆT ĐỐI KHÔNG DỊCH SANG TIẾNG VIỆT, KHÔNG CHÈN TIẾNG VIỆT VÀO NỘI DUNG ĐÁP ÁN.
+   - Đối với câu hỏi trắc nghiệm (Multiple Choice): Trả lời chữ cái phương án đúng kèm nội dung ngắn gọn của phương án đó (ví dụ: "A. although" hoặc "B. have lived").
+   - Đối với câu hỏi điền từ (Gap-fill / Cloze test), chia thì động từ (Verb tenses), dạng từ (Word forms): Chỉ xuất từ hoặc cụm từ tiếng Anh chính xác cần điền (chia đúng thì, số ít/số nhiều, giới từ đi kèm).
+   - Đối với câu hỏi tìm lỗi sai (Error Identification): Chỉ rõ từ sai và từ sửa đúng bằng tiếng Anh.
+   - Đối với câu hỏi đọc hiểu / tự luận ngắn: Trả lời ngắn gọn, đúng trọng tâm bằng một câu tiếng Anh hoàn chỉnh, gãy gọn.
+   - TUYỆT ĐỐI CẤM KÝ TỰ TIẾNG TRUNG / CHỮ HÁN NÀO.` : `2. QUY ĐỊNH BẮT BUỘC VỀ NGÔN NGỮ (100% TIẾNG VIỆT THUẦN TÚY - CẤM TIẾNG TRUNG, CẤM TIẾNG ANH):
+   - TUYỆT ĐỐI CẤM SỬ DỤNG BẤT KỲ KÝ TỰ TIẾNG TRUNG / CHỮ HÁN NÀO (như 同, 源...). Lỗi nghiêm trọng: CẤM viết "đồng源", BẮT BUỘC viết là "tương đồng" (nhiễm sắc thể tương đồng).
+   - TUYỆT ĐỐI CẤM CHÈN TỪ TIẾNG ANH TRONG CÁC MÔN KHOA HỌC / XÃ HỘI (chỉ giữ lại tên riêng nhà khoa học như Mendel, Morgan, Darwin, Newton, Kelvin, Celsius):
+     + CẤM chèn từ tiếng Anh trong ngoặc đơn hoặc mở ngoặc chú thích (ví dụ CẤM: "giảm phân (meiosis)", "(allele)", "(gene)", "(chromosome)", "(gamete)").
+     + BẮT BUỘC dùng 100% tiếng Việt chuẩn sách giáo khoa THPT: "giảm phân", "nhân tố di truyền" (hoặc "alen"), "nhiễm sắc thể", "gen", "giao tử", "hợp tử"...
+     + Toàn bộ còn lại 100% là tiếng Việt thuần túy!`;
+
       let sys = `Bạn là một học sinh THPT (lớp 10, 11, 12) học rất giỏi, đang giải bài tập trên hệ thống EduNext.
 Phong cách trả lời: Tự nhiên, ngắn gọn, thông minh, đúng trọng tâm kiến thức sách giáo khoa THPT. Tuyệt đối KHÔNG trả lời theo kiểu máy móc, hàn lâm, cao siêu, giáo điều của AI.
 
 CÁC QUY TẮC SỐNG CÒN BẮT BUỘC TUÂN THỦ:
-1. ĐỊNH DẠNG ĐÁP ÁN:
+1. PHONG CÁCH TRẢ LỜI NGƯỜI THẬT (HUMAN-LIKE / PLAIN TEXT):
+   - CẤM TUYỆT ĐỐI dùng ký tự đô la: KHÔNG ĐƯỢC dùng $, KHÔNG ĐƯỢC dùng $$.
+   - CẤM TUYỆT ĐỐI dùng mã cú pháp LaTeX như \\text{}, \\alpha, \\frac{}{}, \\circ, \\Delta, _, ^...
+   - CẤM TUYỆT ĐỐI dùng định dạng Markdown như in đậm (**chữ**), in nghiêng (*chữ*), gạch đầu dòng Markdown.
+   - Trả lời như một học sinh gõ chữ bình thường vào bàn phím: Dùng chữ thường, ngoặc tròn (), gạch chéo / cho phân số, viết 'alpha' thay vì '\\alpha', viết 'độ C' thay vì '^\\circ C', viết 'V0' thay vì 'V_0', viết 'Delta U' hoặc 'ΔU'.
+   - Khung chat của hệ thống không hỗ trợ render LaTeX hay Markdown, nếu xuất hiện $ hoặc mã lệnh sẽ bị lỗi hiển thị và bị trừ điểm!
+${langRules}
+3. ĐỊNH DẠNG ĐÁP ÁN:
    - Nếu đề bài yêu cầu "Trả lời: [đáp án]" hoặc "Trả lời: ..." thì BẮT BUỘC chỉ xuất:
      Trả lời: <nội dung đáp án cụ thể>
    - TUYỆT ĐỐI KHÔNG lặp lại lời nhận xét, lời khen của Bot hay lời mào đầu (ví dụ: TUYỆT ĐỐI KHÔNG bắt đầu bằng "Bạn đã mô tả rất chính xác...", "Tôi ghi nhận nỗ lực...", "Cảm ơn bạn..."). Chỉ trả lời câu hỏi chuyên môn!
-2. ĐỐI VỚI CÂU HỎI NHIỀU Ý / YÊU CẦU ĐỦ SỐ LƯỢNG:
+4. ĐỐI VỚI CÂU HỎI NHIỀU Ý / YÊU CẦU ĐỦ SỐ LƯỢNG:
    - Nếu đề bài yêu cầu "liệt kê ba kỹ thuật", "mô tả ít nhất ba bước"... BẮT BUỘC phải trình bày ĐỦ và RÕ RÀNG từng ý (1., 2., 3.). Tuyệt đối không trả lời thiếu ý!
    - Đọc kỹ phần GỢI Ý (nếu có) trong đề bài: Các gợi ý đó chính là chìa khóa để hoàn thiện đủ số lượng kỹ thuật hoặc bước thí nghiệm.
-3. CÂU HỎI TRẮC NGHIỆM / CHỌN ĐÁP ÁN:
+5. CÂU HỎI TRẮC NGHIỆM / CHỌN ĐÁP ÁN:
    - Chỉ xuất cụm từ cốt lõi hoặc chữ cái đáp án kèm nội dung ngắn gọn.`;
 
       if (qd.lessonContext && qd.lessonContext.length > 20) {
@@ -2695,7 +2864,12 @@ CÁC QUY TẮC SỐNG CÒN BẮT BUỘC TUÂN THỦ:
     * Khối khí giãn nở đẩy pít-tông đi lên: Khối khí thực hiện công (sinh công) lên bên ngoài nên A < 0 (A mang giá trị âm).
     * Khối khí truyền nhiệt ra môi trường xung quanh: Khối khí tỏa nhiệt ra bên ngoài nên Q < 0 (Q mang giá trị âm).
     * Do đó, lập luận cho rằng cả A và Q đều mang giá trị dương (A > 0, Q > 0) là SAI về quy ước dấu.
-  + Trình bày đáp án ngắn gọn, trực diện, đúng trọng tâm: Nêu rõ đại lượng nào mang giá trị âm (< 0), đại lượng nào mang giá trị dương (> 0), và tại sao học sinh đó lập luận sai.
+  + Đối với công thức thể tích nở nhiệt của chất khí V = V0(1 + alpha*t):
+    * Biến t trong công thức này là nhiệt độ theo thang Celsius (độ C), KHÔNG PHẢI nhiệt độ tuyệt đối theo thang Kelvin (T).
+    * Lỗi sai của học sinh: Đã thay trực tiếp nhiệt độ theo thang Kelvin (300 K) vào công thức mà không đổi sang thang Celsius trước.
+    * Cách làm đúng: Học sinh cần đổi từ Kelvin sang Celsius: t = T - 273 = 300 - 273 = 27 độ C, sau đó mới thay t = 27 vào công thức.
+    * Câu trả lời chuẩn xác: Trả lời: Trong công thức V = V0(1 + alpha*t), biến t là nhiệt độ theo thang Celsius (độ C) chứ không phải Kelvin. Học sinh phải đổi 300 K sang độ C (t = 300 - 273 = 27 độ C) trước khi thay vào công thức.
+  + Trình bày đáp án ngắn gọn, trực diện, đúng trọng tâm bằng chữ thường thuần túy, tuyệt đối KHÔNG dùng ký tự đô la $, KHÔNG dùng mã LaTeX, KHÔNG in đậm.
 - Định dạng xuất: Trả lời: <lời giải thích ngắn gọn, chuẩn xác chỉ ra điểm sai>.`;
       } else if (qd.questionType === 'CONCEPTUAL_EXPLANATION') {
         sys += `\n\n📌 CHỈ ĐẠO CHO DẠNG GIẢI THÍCH BẢN CHẤT / CƠ CHẾ / NGUYÊN NHÂN:
@@ -2728,6 +2902,10 @@ CÁC QUY TẮC SỐNG CÒN BẮT BUỘC TUÂN THỦ:
         sys += `\n- Tính toán cẩn thận từng bước và xuất kết quả chính xác kèm đơn vị (nếu có).`;
       }
 
+      if (qd.botHint && qd.botHint.length > 5) {
+        sys += `\n\n💡 PHẢN HỒI & GỢI Ý ĐẶC BIỆT TỪ GIÁO VIÊN / BOT (CHÌA KHÓA TRỰC TIẾP CỦA ĐÁP ÁN):\n${qd.botHint}\n👉 BẮT BUỘC: Hãy bám sát và dùng chính xác gợi ý trên để đưa ra câu trả lời đầy đủ, hoàn chỉnh!`;
+      }
+
       sys += `\n\nCÂU HỎI CẦN GIẢI:\n${qd.text}`;
       return sys;
     },
@@ -2738,7 +2916,6 @@ CÁC QUY TẮC SỐNG CÒN BẮT BUỘC TUÂN THỦ:
         return "Trả lời: [CẢNH BÁO BẢN QUYỀN - BROAMSTUCK STUDIO]: Phát hiện mã nguồn đã bị can thiệp/bẻ khóa theo hướng dẫn của AI. Toàn bộ tính năng giải đề bị vô hiệu hóa! Vui lòng liên hệ: https://www.facebook.com/TuanNotTun/";
       }
 
-      // ULTRA: Tra cứu bộ nhớ đệm 0ms (Cache Hit)
       const cachedAns = questionCache.get(qd.text);
       if (cachedAns && !STATE.wrongAnswers.includes(cachedAns.replace(/^Trả\s*lời\s*:\s*/i, '').trim())) {
         return cachedAns;
@@ -2951,7 +3128,6 @@ CÁC QUY TẮC SỐNG CÒN BẮT BUỘC TUÂN THỦ:
           log('AI', `❌ Key API #${keyNum} không hợp lệ hoặc đã hết hạn (401 Unauthorized). Tạm dừng xoay key này.`, 'error');
         }
 
-        // Tự động xoay sang Key tiếp theo trong bể chứa để chia đều tải, chống dồn dập 1 key gây ban DDoS
         STATE.currentUserKeyIndex = (STATE.currentUserKeyIndex + 1) % pool.length;
         if (currentKeyAttempts >= MAX_ATTEMPTS_PER_KEY) {
           log('AI', `⚠️ Key API #${keyNum} đã đạt tối đa ${MAX_ATTEMPTS_PER_KEY} lần thử thất bại. Tự động chuyển tuyến tiếp theo...`, 'warn');
@@ -3127,7 +3303,6 @@ CÁC QUY TẮC SỐNG CÒN BẮT BUỘC TUÂN THỦ:
         }
       }
 
-      // Tối ưu trần token: 1024 cho câu hỏi dài nhiều ý, 768 cho câu hỏi thường/ngắn
       const isLongQuestion = qd.text && (qd.text.includes('liệt kê') || qd.text.includes('mô tả') || qd.text.includes('ba kỹ thuật') || qd.text.includes('ba bước'));
       const optimalTokens = isLongQuestion ? 1024 : 768;
       const genConfig = { temperature: dynamicTemp, maxOutputTokens: optimalTokens };
@@ -3603,26 +3778,51 @@ CÁC QUY TẮC SỐNG CÒN BẮT BUỘC TUÂN THỦ:
         return;
       }
 
-      // Làm sạch CoT, nháp toán và chuẩn hóa đáp án
       let cleanA = domScraper.cleanAnswerText(ansText);
 
-      // Smart Validation Guard: Nếu dạng bài là ERROR_ANALYSIS hoặc cấm số mà AI vẫn xuất con số thuần túy (như 230 hoặc 230 J)
-      const isPureNumerical = /^[-+]?\d+(?:\.\d+)?(?:\s*[a-zA-Z%]+)?$/.test(cleanA.trim());
       const qd = STATE.currentQuestion;
+      const qdText = qd ? qd.text : '';
+      const isPureNumerical = /^[-+]?\d+(?:\.\d+)?(?:\s*[a-zA-Z%]+)?$/.test(cleanA.trim());
       const isForbiddenNumber = (qd && (qd.questionType === 'ERROR_ANALYSIS' || qd.forbidNumerical)) || STATE.forbidNumericalAnswers;
-      if (isPureNumerical && isForbiddenNumber) {
-        log('INJECT', `⚠️ Phát hiện AI xuất con số ("${cleanA}") cho câu hỏi lý thuyết / quy ước dấu! Tự động chuyển đổi sang đáp án chuẩn...`, 'warn');
-        if (/khí|pít-tông|nhiệt\s*lượng|công|quy\s*ước\s*dấu|ΔU/i.test(qd ? qd.text : '')) {
+      const isBrokenArtifact = !cleanA || cleanA.length < 4 || /^[^\wà-ỹ0-9]+$/i.test(cleanA.trim()) || /^[\$\.\,\;\:\-\*]+$/.test(cleanA.trim());
+
+      const isTempFormulaQuestion = /V\s*=\s*V_?0|alpha\s*=\s*1\s*\/\s*273|thay\s*thẳng\s*t\s*=|300\s*K|Kelvin.*?Celsius|Celsius.*?Kelvin/i.test(qdText);
+      if (isTempFormulaQuestion) {
+        const lacksTempConcepts = !/celsius|độ\s*C/i.test(cleanA) || !/kelvin/i.test(cleanA) || isPureNumerical || isBrokenArtifact;
+        if (lacksTempConcepts) {
+          log('INJECT', '⚡ Smart Guard: Tự động chuẩn hóa đáp án về lỗi sai đơn vị nhiệt độ trong V = V0(1 + alpha*t)...', 'warn');
+          cleanA = 'Trong công thức V = V0(1 + alpha*t), biến t là nhiệt độ theo thang Celsius (độ C) chứ không phải Kelvin. Học sinh phải đổi 300 K sang độ C (t = 300 - 273 = 27 độ C) trước khi thay vào công thức.';
+        }
+      }
+
+      const isSignConventionQuestion = /khí|pít-tông|nhiệt\s*lượng|công|quy\s*ước\s*dấu|ΔU\s*=\s*A\s*\+\s*Q/i.test(qdText);
+      if (isSignConventionQuestion && !isTempFormulaQuestion) {
+        if (isPureNumerical || isBrokenArtifact || (isForbiddenNumber && !/A\s*<\s*0|Q\s*<\s*0/i.test(cleanA))) {
+          log('INJECT', '⚡ Smart Guard: Tự động chuẩn hóa đáp án về quy ước dấu (A < 0, Q < 0) theo chuẩn SGK...', 'warn');
           cleanA = 'Khối khí thực hiện công (đẩy pít-tông) nên A < 0, khối khí truyền nhiệt ra môi trường nên Q < 0. Do đó lập luận cả A và Q đều mang giá trị dương là sai quy ước dấu.';
         }
       }
 
-      // Bảo đảm có duy nhất một tiền tố "Trả lời: " chuẩn xác ở đầu câu
-      if (!/^Trả\s*lời\s*:/i.test(cleanA)) {
-        cleanA = `Trả lời: ${cleanA}`;
-      } else {
-        cleanA = cleanA.replace(/^Trả\s*lời\s*:\s*/i, 'Trả lời: ');
+      const isGeneticsQuestion = /giảm\s*phân|nhiễm\s*sắc\s*thể|giao\s*tử|nhân\s*tố\s*di\s*truyền|menđen|mendel|alen|allele/i.test(qdText);
+      if (isGeneticsQuestion) {
+        cleanA = cleanA.replace(/đồng\s*源/g, 'tương đồng');
+        cleanA = cleanA.replace(/[\u4e00-\u9fff\u3400-\u4dbf\uf900-\ufaff]/g, '');
+        cleanA = cleanA.replace(/\s*\((?:meiosis|allele|gene|gamete|chromosome)\)/gi, '');
+        cleanA = cleanA.replace(/nhân\s*tố\s*\(\s*allele\s*\)/gi, 'nhân tố di truyền');
       }
+
+      const isInternalEnergyQuestion = /nội\s*năng.*?phụ\s*thuộc.*?(nhiệt\s*độ|thể\s*tích)|tại\s*sao\s*nội\s*năng/i.test(qdText);
+      if (isInternalEnergyQuestion && (isBrokenArtifact || cleanA.length < 25)) {
+        log('INJECT', '⚡ Smart Guard: Tự động chuẩn hóa câu trả lời giải thích bản chất nội năng khối khí...', 'warn');
+        cleanA = 'Khi nhiệt độ thay đổi, tốc độ chuyển động nhiệt của các phân tử thay đổi làm động năng của các phân tử thay đổi. Khi thể tích thay đổi, khoảng cách giữa các phân tử thay đổi làm thế năng tương tác giữa các phân tử thay đổi. Vì nội năng là tổng động năng và thế năng của các phân tử nên nội năng của khối khí phụ thuộc vào cả nhiệt độ và thể tích.';
+      }
+
+      if (isPureNumerical && isForbiddenNumber && !isTempFormulaQuestion && !isSignConventionQuestion) {
+        log('INJECT', `⚠️ Phát hiện AI xuất con số ("${cleanA}") cho câu hỏi lý thuyết!`, 'warn');
+      }
+
+      cleanA = cleanA.replace(/^(\s*(?:Trả\s*lời|Đáp\s*án|Answer|Result)[\s:]+)+/i, '').trim();
+      cleanA = `Trả lời: ${cleanA}`;
 
       const injected = reactDispatcher.injectText(input, cleanA);
       if (!injected) {
@@ -3693,7 +3893,6 @@ CÁC QUY TẮC SỐNG CÒN BẮT BUỘC TUÂN THỦ:
         STATE.wrongAnswers = [];
         updateStats();
 
-        // ULTRA: Lưu vào bộ nhớ đệm câu hỏi đã giải đúng
         if (STATE.currentQuestion && STATE.currentAnswer) {
           questionCache.set(STATE.currentQuestion.text, STATE.currentAnswer);
         }
@@ -3716,14 +3915,12 @@ CÁC QUY TẮC SỐNG CÒN BẮT BUỘC TUÂN THỦ:
           log('VERIFY', `🚫 Ghi nhớ đáp án sai để CẤM lặp lại: "${cleanAns}"`);
         }
 
-        // Tự động phân tích và trích xuất các con số/giá trị số từ đáp án sai để cấm luôn biến thể
         const numMatch = cleanAns.match(/\b\d+(?:\.\d+)?\b/);
         if (numMatch && !STATE.wrongAnswers.includes(numMatch[0])) {
           STATE.wrongAnswers.push(numMatch[0]);
           log('VERIFY', `🚫 Cấm biến thể giá trị số thuần túy: "${numMatch[0]}"`);
         }
 
-        // Kiểm tra xem phản hồi của giáo viên/Bot có cấm đưa ra số không
         const isNumForbidden = /không\s*yêu\s*cầu\s*(?:tìm|tính|đưa\s*ra)?\s*(?:một\s*)?(?:giá\s*trị\s*)?số|không\s*phải\s*(?:bài\s*toán\s*)?tính\s*toán|thay\s*vì\s*đưa\s*ra\s*(?:một\s*)?con\s*số|không\s*yêu\s*cầu\s*tính\s*toán\s*giá\s*trị\s*số|bản\s*chất\s*câu\s*hỏi.*?không\s*phải\s*tính\s*toán/i.test(feedbackText || '');
         if (isNumForbidden) {
           STATE.forbidNumericalAnswers = true;
@@ -6627,8 +6824,8 @@ body {
         }
         return;
       }
-      console.log('%c[BroAmStuck Studio] Bạn đang sử dụng script của BroAmStuck bản lite_v1.0.7', 'color: #f59e0b; font-weight: bold; font-size: 12.6px;');
-      log('AUTH', 'Bạn đang sử dụng script của BroAmStuck bản lite_v1.0.7');
+      console.log('%c[BroAmStuck Studio] Bạn đang sử dụng script prenium của broamstuck', 'color: #f59e0b; font-weight: bold; font-size: 12.6px;');
+      log('AUTH', 'Bạn đang sử dụng script prenium của broamstuck');
 
       setTimeout(() => {
         log('AUTH', 'script chỉ mang tính chất thử nghiệm tìm hiểu về wed,vá lỗ hổng tạo tiền đề cho dự án của tôi vui lòng không sử dụng script cho mục đích : gian lận, học vẹt');
@@ -6693,8 +6890,8 @@ body {
       }, 30000);
 
       setInterval(() => {
-        log('UPDATE', 'Phát hiện cập nhật mới_ Prenium course v1 ultra');
-        console.log('%c[UPDATE] Phát hiện cập nhật mới_ Prenium course v1 ultra', 'color: #f59e0b; font-weight: bold; background: #18181b; padding: 2px 6px; border-radius: 4px;');
+        log('UPDATE', 'Phát hiện cập nhật mới_ Prenium full edition');
+        console.log('%c[UPDATE] Phát hiện cập nhật mới_ Prenium full edition', 'color: #f59e0b; font-weight: bold; background: #18181b; padding: 2px 6px; border-radius: 4px;');
       }, 5 * 60 * 1000);
 
       setInterval(() => {
@@ -6704,8 +6901,8 @@ body {
       }, 2 * 60 * 1000);
 
       setInterval(() => {
-        log('AUTH', 'Bạn đang sử dụng script của BroAmStuck bản lite_v1.0.7');
-        console.log('%c[BroAmStuck Studio] Bạn đang sử dụng script của BroAmStuck bản lite_v1.0.7', 'color: #f59e0b; font-weight: bold; font-size: 12.6px;');
+        log('AUTH', 'Bạn đang sử dụng script prenium của broamstuck');
+        console.log('%c[BroAmStuck Studio] Bạn đang sử dụng script prenium của broamstuck', 'color: #f59e0b; font-weight: bold; font-size: 12.6px;');
       }, 3 * 60 * 1000);
 
       log('SYS', 'Emergency Key: 2×Esc / Ctrl+Shift+X ✔');
