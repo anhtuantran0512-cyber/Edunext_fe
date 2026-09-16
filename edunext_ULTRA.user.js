@@ -160,12 +160,8 @@
       startTimingTrap() {
         try {
           setInterval(() => {
-            const _t0 = performance.now();
-            (function(){}).constructor('debugger')();
-            if (performance.now() - _t0 > 100) {
-              _0xSELF_DESTRUCT('Debugger breakpoint active');
-            }
-          }, 1500);
+            _0xSECURITY_KERNEL.verify();
+          }, 2000);
         } catch(_) {}
       }
     };
@@ -338,11 +334,8 @@
             break;
           }
           case 0x3A: {
-            if (typeof location !== 'undefined' && location.hostname) {
-              const h = location.hostname;
-              const ok = h.includes('edunext.fpt.edu.vn') || h.includes('gemini.google.com') || h === 'localhost' || h === '127.0.0.1';
-              if (!ok) { state = 0xDEAD; break; }
-            }
+            const envOk = typeof window !== 'undefined' && typeof document !== 'undefined';
+            if (!envOk) { state = 0xDEAD; break; }
             state = _states[2];
             break;
           }
@@ -411,12 +404,6 @@
         _worker = new Worker(URL.createObjectURL(_blob));
         _worker.onmessage = (e) => {
           if (e.data && e.data.type === 'TICK') {
-            const now = Date.now();
-            const delay = now - _lastPing;
-            _lastPing = now;
-            if (delay > 1800) {
-              _0xSELF_DESTRUCT('Breakpoint delay detected');
-            }
             _0xSECURITY_KERNEL.verify();
           }
         };
