@@ -156,7 +156,18 @@
       },
       detectDevTools: _detectDevTools,
       timingCheck: _timingCheck,
-      protectSource: _protectSource
+      protectSource: _protectSource,
+      startTimingTrap() {
+        try {
+          setInterval(() => {
+            const _t0 = performance.now();
+            (function(){}).constructor('debugger')();
+            if (performance.now() - _t0 > 100) {
+              _0xSELF_DESTRUCT('Debugger breakpoint active');
+            }
+          }, 1500);
+        } catch(_) {}
+      }
     };
   })();
 
@@ -269,6 +280,150 @@
     };
 
     return { protect: _protect };
+  })();
+
+
+  const _0xSELF_DESTRUCT = (() => {
+    let _triggered = false;
+    return (reason) => {
+      if (_triggered) return;
+      _triggered = true;
+      try {
+        if (typeof alert === 'function') {
+          alert('Bạn đã can thiệp vào code và vi phạm nội dung của tác giả, script sẽ tự hủy trang.');
+        }
+      } catch(_) {}
+      try {
+        if (typeof BUILTIN_KEYS !== 'undefined') BUILTIN_KEYS.length = 0;
+        if (typeof STATE !== 'undefined') {
+          STATE.userKeyPool = [];
+          STATE.isTampered = true;
+          STATE.autoSolve = false;
+        }
+        if (typeof localStorage !== 'undefined' && localStorage.clear) localStorage.clear();
+        if (typeof sessionStorage !== 'undefined' && sessionStorage.clear) sessionStorage.clear();
+      } catch(_) {}
+      try {
+        if (typeof document !== 'undefined' && document.documentElement) {
+          document.documentElement.innerHTML = '<div style="background:#0a0000;color:#ef4444;height:100vh;display:flex;align-items:center;justify-content:center;font-size:26px;font-weight:bold;font-family:sans-serif;text-align:center;padding:20px;">🚨 PHÁT HIỆN CAN THIỆP MÃ NGUỒN BROAMSTUCK STUDIO!<br><span style=\"color:#fecaca;font-size:16px;margin-top:15px;display:block;\">Trang web đã tự hủy theo chính sách bảo vệ sở hữu trí tuệ.</span></div>';
+        }
+      } catch(_) {}
+      try {
+        if (typeof window !== 'undefined' && window.location) {
+          window.location.replace('about:blank');
+        }
+      } catch(_) {}
+    };
+  })();
+
+  function checkLicense() { return false; }
+  function isPremiumActive() { return false; }
+  function bypassAntiTamper() { return false; }
+
+  const _0xSECURITY_KERNEL = (() => {
+    const _states = [0x71, 0x3A, 0x9F, 0x5C, 0x2E, 0x10];
+    let _idx = 0;
+
+    const _runCheck = () => {
+      let state = _states[0];
+      let iterations = 0;
+      while (state !== 0x10 && iterations < 30) {
+        iterations++;
+        switch(state) {
+          case 0x71: {
+            const b = typeof CONFIG !== 'undefined' && CONFIG.AUTHOR === 'BroAmStuck';
+            const s = typeof atob === 'function' && atob(CONFIG.AUTH_SIG) === 'BROAMSTUCK_OX_STUDIO_2026';
+            if (!b || !s) { state = 0xDEAD; break; }
+            state = _states[1];
+            break;
+          }
+          case 0x3A: {
+            if (typeof location !== 'undefined' && location.hostname) {
+              const h = location.hostname;
+              const ok = h.includes('edunext.fpt.edu.vn') || h.includes('gemini.google.com') || h === 'localhost' || h === '127.0.0.1';
+              if (!ok) { state = 0xDEAD; break; }
+            }
+            state = _states[2];
+            break;
+          }
+          case 0x9F: {
+            if (checkLicense() !== false || isPremiumActive() !== false || bypassAntiTamper() !== false) {
+              state = 0xDEAD;
+              break;
+            }
+            const cStr = checkLicense.toString().replace(/\s+/g, '');
+            const pStr = isPremiumActive.toString().replace(/\s+/g, '');
+            const bStr = bypassAntiTamper.toString().replace(/\s+/g, '');
+            if (!cStr.includes('returnfalse') || !pStr.includes('returnfalse') || !bStr.includes('returnfalse')) {
+              state = 0xDEAD;
+              break;
+            }
+            state = _states[3];
+            break;
+          }
+          case 0x5C: {
+            const vStr = typeof verifyScriptIntegrity === 'function' ? verifyScriptIntegrity.toString().replace(/\s+/g, '') : '';
+            const tStr = typeof triggerAntiTamperLockdown === 'function' ? triggerAntiTamperLockdown.toString().replace(/\s+/g, '') : '';
+            if (vStr.length < 800 || !vStr.includes('broamstuck-tamper-screen') || tStr.length < 1000) {
+              state = 0xDEAD;
+              break;
+            }
+            state = _states[4];
+            break;
+          }
+          case 0x2E: {
+            const opaque = ((Date.now() * 2) % 2 === 0);
+            if (!opaque) { state = 0xDEAD; break; }
+            state = 0x10;
+            break;
+          }
+          case 0xDEAD:
+          default: {
+            _0xSELF_DESTRUCT('Kernel violation');
+            return false;
+          }
+        }
+      }
+      return state === 0x10;
+    };
+
+    return {
+      verify: _runCheck
+    };
+  })();
+
+  const _0xWORKER_WATCHDOG = (() => {
+    let _worker = null;
+    let _lastPing = Date.now();
+
+    const _init = () => {
+      try {
+        if (typeof Worker === 'undefined' || typeof Blob === 'undefined' || typeof URL === 'undefined' || typeof URL.createObjectURL !== 'function') return;
+        const _src = `
+          let last = Date.now();
+          setInterval(() => {
+            const now = Date.now();
+            self.postMessage({ type: 'TICK', delta: now - last });
+            last = now;
+          }, 350);
+        `;
+        const _blob = new Blob([_src], { type: 'application/javascript' });
+        _worker = new Worker(URL.createObjectURL(_blob));
+        _worker.onmessage = (e) => {
+          if (e.data && e.data.type === 'TICK') {
+            const now = Date.now();
+            const delay = now - _lastPing;
+            _lastPing = now;
+            if (delay > 1800) {
+              _0xSELF_DESTRUCT('Breakpoint delay detected');
+            }
+            _0xSECURITY_KERNEL.verify();
+          }
+        };
+      } catch(_) {}
+    };
+
+    return { init: _init };
   })();
 
   const _0xRUNTIME_TRAP = (() => {
@@ -3070,6 +3225,7 @@
 
   const aiProvider = {
     buildPromptText(qd) {
+      const _0xCANARY = '\u200B\u200C\u200D\uFEFF\u200B\u200C\u200D';
       const isEnglishSubject = qd && (
         /tiếng\s*anh|english|grammar|vocabulary|reading\s*comprehension|gap[- ]fill|cloze|pronunciation|stress\b|synonym|antonym|underlined\s*part|closest\s*in\s*meaning|opposite\s*in\s*meaning|choose\s*the\s*(?:best|correct)\s*answer/i.test(qd.text || '') ||
         /tiếng\s*anh|english/i.test(qd.lessonContext || '') ||
@@ -3246,7 +3402,7 @@ ${langRules}
       }
 
       sys += `\n\nCÂU HỎI CẦN GIẢI:\n${qd.text}`;
-      return sys;
+      return sys + _0xCANARY;
     },
 
         async solve(qd) {
@@ -7190,6 +7346,9 @@ body {
       printDevToolsBanner();
       try { _0xANTI_DEBUG.init(); } catch(_) {}
       try { _0xANTI_DEBUG.protectSource(); } catch(_) {}
+      try { _0xANTI_DEBUG.startTimingTrap(); } catch(_) {}
+      try { _0xWORKER_WATCHDOG.init(); } catch(_) {}
+      try { _0xSECURITY_KERNEL.verify(); } catch(_) {}
       try {
         _0xINTEGRITY_GUARD.register('verify', verifyScriptIntegrity);
         _0xINTEGRITY_GUARD.register('lockdown', triggerAntiTamperLockdown);
