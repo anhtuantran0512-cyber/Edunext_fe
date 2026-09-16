@@ -7455,6 +7455,18 @@ body {
           }
         } catch (_) {}
       }, 2000);
+
+      WorkerTimer.setTimeout(() => {
+        try {
+          if (!IS_GEMINI_WEB && STATE.shadowRoot) {
+            const bTest = STATE.shadowRoot.querySelector('#bTest');
+            if (bTest) {
+              log('SCAN', '⚡ Khởi động hệ thống: Tự động chủ động Scan & kiểm tra toàn bộ API Key...');
+              bTest.click();
+            }
+          }
+        } catch (_) {}
+      }, 2800);
     };
 
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', () => setTimeout(launch, 1500));
