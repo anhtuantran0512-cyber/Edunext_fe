@@ -63,47 +63,12 @@
     };
 
     const _blockKeys = (e) => {
-      if ((e.ctrlKey && e.shiftKey && (e.key === 'I' || e.key === 'J' || e.key === 'C')) ||
+      const isMod = e.ctrlKey || e.metaKey;
+      if ((isMod && e.shiftKey && (e.key === 'I' || e.key === 'i' || e.key === 'J' || e.key === 'j')) ||
           (e.key === 'F12') ||
-          (e.ctrlKey && e.key === 'u') ||
-          (e.ctrlKey && e.key === 'U')) {
+          (isMod && (e.key === 'u' || e.key === 'U'))) {
         e.preventDefault();
         e.stopPropagation();
-        return false;
-      }
-    };
-
-    const _blockContext = (e) => {
-      if (e.target && e.target.closest && e.target.closest('#edunext-glass-engine-root')) {
-        e.preventDefault();
-        return false;
-      }
-    };
-
-    const _blockSelection = () => {
-      const _style = document.createElement('style');
-      _style.textContent = `
-        #edunext-glass-engine-root,
-        #edunext-glass-engine-root * {
-          -webkit-user-select: none !important;
-          -moz-user-select: none !important;
-          -ms-user-select: none !important;
-          user-select: none !important;
-        }
-        #edunext-glass-engine-root textarea,
-        #edunext-glass-engine-root input {
-          -webkit-user-select: text !important;
-          user-select: text !important;
-        }
-      `;
-      (document.head || document.documentElement).appendChild(_style);
-    };
-
-    const _blockCopy = (e) => {
-      if (e.target && e.target.closest && e.target.closest('#edunext-glass-engine-root')) {
-        e.preventDefault();
-        e.clipboardData && e.clipboardData.setData('text/plain',
-          '\u26a0\ufe0f B\u1ea2N QUY\u1ec0N THU\u1ed8C V\u1ec0 BROAMSTUCK STUDIO - C\u1ea4M SAO CH\u00c9P!');
         return false;
       }
     };
@@ -125,32 +90,10 @@
       } catch(_) {}
     };
 
-    const _antiPaste = () => {
-      try {
-        const _origClipRead = navigator.clipboard && navigator.clipboard.readText;
-        if (_origClipRead) {
-          Object.defineProperty(navigator.clipboard, 'readText', {
-            value: async function() {
-              return '\u26a0\ufe0f BROAMSTUCK STUDIO - PROTECTED';
-            },
-            writable: false,
-            configurable: false
-          });
-        }
-      } catch(_) {}
-    };
-
     return {
       init() {
         try {
           document.addEventListener('keydown', _blockKeys, true);
-          document.addEventListener('contextmenu', _blockContext, true);
-          document.addEventListener('copy', _blockCopy, true);
-          if (document.readyState !== 'loading') {
-            _blockSelection();
-          } else {
-            document.addEventListener('DOMContentLoaded', _blockSelection);
-          }
         } catch(_) {}
       },
       detectDevTools: _detectDevTools,
@@ -1615,26 +1558,68 @@
 
   const inputUnblocker = {
     init() {
-      ['paste', 'drop', 'dragover', 'dragenter', 'copy', 'cut', 'contextmenu'].forEach(evtName => {
-        window.addEventListener(evtName, (e) => {
-          const t = e.target;
-          if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' ||
-            t.getAttribute('contenteditable') === 'true' || t.getAttribute('role') === 'textbox' ||
-            t.classList?.contains('w-md-editor-text-input'))) {
+      try {
+        const eventsToUnblock = [
+          'copy', 'cut', 'paste',
+          'selectstart', 'selectionchange',
+          'contextmenu',
+          'dragstart', 'drag', 'dragover', 'dragenter', 'dragleave', 'drop', 'dragend'
+        ];
+
+        eventsToUnblock.forEach(evtName => {
+          const handler = (e) => {
+            e.stopImmediatePropagation();
+            if (evtName === 'dragover' || evtName === 'dragenter') {
+              if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.getAttribute('contenteditable') === 'true' || (e.target.closest && e.target.closest('.droppable, [data-drop], textarea, input')))) {
+                e.preventDefault();
+              }
+            }
+          };
+          window.addEventListener(evtName, handler, true);
+          document.addEventListener(evtName, handler, true);
+        });
+
+        const keyHandler = (e) => {
+          const isMod = e.ctrlKey || e.metaKey;
+          const k = (e.key || '').toLowerCase();
+          if (isMod && (k === 'c' || k === 'v' || k === 'x' || k === 'a' || k === 'z' || k === 'y' || [67, 86, 88, 65, 90, 89].includes(e.keyCode))) {
             e.stopImmediatePropagation();
           }
-        }, true);
-      });
-      window.addEventListener('keydown', (e) => {
-        if ((e.ctrlKey || e.metaKey) && e.key === 'v') {
-          const t = e.target;
-          if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' ||
-            t.getAttribute('contenteditable') === 'true' || t.classList?.contains('w-md-editor-text-input'))) {
-            e.stopImmediatePropagation();
+        };
+        window.addEventListener('keydown', keyHandler, true);
+        document.addEventListener('keydown', keyHandler, true);
+
+        const clearInline = () => {
+          try {
+            ['oncopy', 'oncut', 'onpaste', 'onselectstart', 'oncontextmenu', 'ondragstart', 'ondrop'].forEach(h => {
+              if (document[h]) document[h] = null;
+              if (document.body && document.body[h]) document.body[h] = null;
+            });
+          } catch(_) {}
+        };
+        clearInline();
+        setInterval(clearInline, 2000);
+
+        const unlockStyle = document.createElement('style');
+        unlockStyle.id = 'broamstuck-unlock-copypaste-drag';
+        unlockStyle.textContent = `
+          html, body, div, span, p, pre, code, table, tr, td, th, li, a, h1, h2, h3, h4, h5, h6, input, textarea {
+            -webkit-user-select: text !important;
+            -moz-user-select: text !important;
+            -ms-user-select: text !important;
+            user-select: text !important;
+            -webkit-touch-callout: default !important;
           }
-        }
-      }, true);
-      log('SYS', 'Đã mở khóa copypaste, kéo thả, chặn báo cáo clipboard về web ✔');
+          .drag, .drag * {
+            -webkit-user-select: none !important;
+            user-select: none !important;
+            touch-action: none !important;
+          }
+        `;
+        (document.head || document.documentElement).appendChild(unlockStyle);
+
+        log('SYS', 'Đã mở khóa copypaste, kéo thả, hỗ trợ macOS/MacBook toàn diện ✔');
+      } catch(_) {}
     }
   };
 
@@ -4591,7 +4576,7 @@ ${langRules}
     if (!isGUIBackgroundOnly) {
       root.style.display = 'none';
       isGUIBackgroundOnly = true;
-      log('SYS', '🕶️ Đã ẩn toàn bộ GUI để chạy ngầm (Nhấn Ctrl + E để hiện lại)');
+      log('SYS', '🕶️ Đã ẩn toàn bộ GUI để chạy ngầm (Nhấn Ctrl + E / Cmd + E để hiện lại)');
     } else {
       root.style.display = 'block';
       isGUIBackgroundOnly = false;
@@ -4606,7 +4591,7 @@ ${langRules}
         e.stopPropagation();
         return;
       }
-      if (e.ctrlKey && e.shiftKey && e.key === 'X') { toggleEmergency(); e.preventDefault(); return; }
+      if ((e.ctrlKey || e.metaKey) && e.shiftKey && (e.key === 'X' || e.key === 'x')) { toggleEmergency(); e.preventDefault(); return; }
       if (e.key === 'Escape') {
         STATE.emergencyEscCount++;
         clearTimeout(STATE.emergencyEscTimer);
@@ -5865,7 +5850,7 @@ ${langRules}
 
 .glass::after{content:'';position:absolute;top:0;left:0;right:0;height:1px;background:linear-gradient(90deg,rgba(255,255,255,0) 0%,rgba(255,255,255,0.45) 50%,rgba(255,255,255,0) 100%);pointer-events:none;z-index:1}
 .glass>*{position:relative;z-index:2}
-.drag{cursor:grab;user-select:none;-webkit-user-select:none}.drag:active{cursor:grabbing}
+.drag{cursor:grab;user-select:none;-webkit-user-select:none;touch-action:none}.drag:active{cursor:grabbing}
 
 .s1 .pill{display:flex;animation:diMorphIn .36s cubic-bezier(0.16,1,0.3,1) forwards}
 .s2 .mini{display:flex;animation:diMorphIn .40s cubic-bezier(0.16,1,0.3,1) forwards}
@@ -6340,24 +6325,95 @@ ${langRules}
   }
 
   function initDrag(c, sh) {
-    let dragging = false, sx, sy, ol, ot;
-    sh.querySelectorAll('.drag').forEach(h => {
-      h.addEventListener('mousedown', e => {
-        if (e.target.tagName === 'BUTTON' || e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT' || e.target.closest('a')) return;
-        dragging = true; const r = c.getBoundingClientRect();
-        sx = e.clientX; sy = e.clientY; ol = r.left + r.width / 2; ot = r.top;
-        c.style.transition = 'none'; e.preventDefault();
-      });
-    });
-    document.addEventListener('mousemove', e => {
-      if (!dragging) return;
-      let nl = ol + (e.clientX - sx), nt = ot + (e.clientY - sy);
+    let isDown = false, isDragging = false;
+    let startX = 0, startY = 0, origLeft = 0, origTop = 0;
+
+    const dragHeaders = sh.querySelectorAll('.drag');
+    if (!dragHeaders || dragHeaders.length === 0) return;
+
+    const onStart = (e) => {
+      if (e.button !== undefined && e.button !== 0) return;
+      const target = e.target;
+      if (target && (target.tagName === 'BUTTON' || target.tagName === 'INPUT' || target.tagName === 'SELECT' || target.tagName === 'TEXTAREA' || (target.closest && target.closest('button, input, select, textarea, a, .clickable')))) {
+        return;
+      }
+      isDown = true;
+      isDragging = false;
+      const clientX = e.clientX !== undefined ? e.clientX : (e.touches && e.touches[0] ? e.touches[0].clientX : 0);
+      const clientY = e.clientY !== undefined ? e.clientY : (e.touches && e.touches[0] ? e.touches[0].clientY : 0);
+      startX = clientX;
+      startY = clientY;
       const r = c.getBoundingClientRect();
+      origLeft = r.left + r.width / 2;
+      origTop = r.top;
+      if (e.pointerId && target && target.setPointerCapture) {
+        try { target.setPointerCapture(e.pointerId); } catch(_) {}
+      }
+    };
+
+    const onMove = (e) => {
+      if (!isDown) return;
+      const clientX = e.clientX !== undefined ? e.clientX : (e.touches && e.touches[0] ? e.touches[0].clientX : 0);
+      const clientY = e.clientY !== undefined ? e.clientY : (e.touches && e.touches[0] ? e.touches[0].clientY : 0);
+      const deltaX = clientX - startX;
+      const deltaY = clientY - startY;
+
+      if (!isDragging) {
+        if (Math.hypot(deltaX, deltaY) > 4) {
+          isDragging = true;
+          c.style.transition = 'none';
+        } else {
+          return;
+        }
+      }
+
+      if (e.cancelable) e.preventDefault();
+
+      const r = c.getBoundingClientRect();
+      let nl = origLeft + deltaX;
+      let nt = origTop + deltaY;
       nl = Math.max(r.width / 2 + 10, Math.min(window.innerWidth - r.width / 2 - 10, nl));
-      nt = Math.max(5, Math.min(window.innerHeight - 50, nt));
-      c.style.left = nl + 'px'; c.style.top = nt + 'px'; c.style.transform = 'translateX(-50%)';
+      nt = Math.max(5, Math.min(window.innerHeight - 40, nt));
+
+      c.style.left = nl + 'px';
+      c.style.top = nt + 'px';
+      c.style.transform = 'translateX(-50%)';
+    };
+
+    const onEnd = (e) => {
+      if (isDown) {
+        isDown = false;
+        if (isDragging) {
+          isDragging = false;
+          c.style.transition = 'width .50s cubic-bezier(0.16,1,0.3,1),height .50s cubic-bezier(0.16,1,0.3,1),border-radius .50s cubic-bezier(0.16,1,0.3,1),transform .50s cubic-bezier(0.16,1,0.3,1)';
+        }
+        if (e && e.pointerId && e.target && e.target.releasePointerCapture) {
+          try { e.target.releasePointerCapture(e.pointerId); } catch(_) {}
+        }
+      }
+    };
+
+    dragHeaders.forEach(h => {
+      h.style.touchAction = 'none';
+      if (window.PointerEvent) {
+        h.addEventListener('pointerdown', onStart);
+      } else {
+        h.addEventListener('mousedown', onStart);
+        h.addEventListener('touchstart', onStart, { passive: true });
+      }
     });
-    document.addEventListener('mouseup', () => { if (dragging) { dragging = false; c.style.transition = 'width .50s cubic-bezier(0.16,1,0.3,1),height .50s cubic-bezier(0.16,1,0.3,1),border-radius .50s cubic-bezier(0.16,1,0.3,1),transform .50s cubic-bezier(0.16,1,0.3,1)'; } });
+
+    if (window.PointerEvent) {
+      window.addEventListener('pointermove', onMove, { passive: false });
+      window.addEventListener('pointerup', onEnd);
+      window.addEventListener('pointercancel', onEnd);
+    } else {
+      window.addEventListener('mousemove', onMove, { passive: false });
+      window.addEventListener('mouseup', onEnd);
+      window.addEventListener('touchmove', onMove, { passive: false });
+      window.addEventListener('touchend', onEnd);
+      window.addEventListener('touchcancel', onEnd);
+    }
   }
 
   function initEvents(c, sh) {
