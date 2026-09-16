@@ -170,15 +170,26 @@
   const _0xINTEGRITY_GUARD = (() => {
     const _fnHashes = new Map();
     const _criticalFns = [];
+    const _GOLDEN_MATRIX = {
+      'checkLicense': '461ed693ba0a4521',
+      'isPremiumActive': '3ef8453102adbfad',
+      'bypassAntiTamper': '41847c61c1f8851b',
+      'banner': '0495c36a6f7083cc',
+      'verify': '0012d0616a488dad',
+      'lockdown': 'fe690a7aefe9fc96'
+    };
 
     const _hashFn = (fn) => {
-      const s = fn.toString().replace(/\s+/g, '');
-      let h = 0x811c9dc5;
+      const s = (typeof fn === 'function' ? fn.toString() : String(fn)).replace(/\s+/g, '');
+      let h1 = 0x811c9dc5, h2 = 0x9e3779b9;
       for (let i = 0; i < s.length; i++) {
-        h ^= s.charCodeAt(i);
-        h = Math.imul(h, 0x01000193);
+        const c = s.charCodeAt(i);
+        h1 ^= c;
+        h1 = Math.imul(h1, 0x01000193);
+        h2 ^= c;
+        h2 = Math.imul(h2, 0x5bd1e995);
       }
-      return (h >>> 0).toString(16).padStart(8, '0');
+      return ((h1 >>> 0).toString(16).padStart(8, '0') + (h2 >>> 0).toString(16).padStart(8, '0'));
     };
 
     const _registerFn = (name, fn) => {
@@ -186,11 +197,32 @@
       _criticalFns.push({ name, fn });
     };
 
+    const _verifyConfig = () => {
+      if (typeof CONFIG === 'undefined') return false;
+      if (CONFIG.AUTHOR !== 'BroAmStuck') return false;
+      if (typeof atob === 'function' && atob(CONFIG.AUTH_SIG) !== 'BROAMSTUCK_OX_STUDIO_2026') return false;
+      if (CONFIG.FACEBOOK_URL !== 'https://www.facebook.com/TuanNotTun/') return false;
+      if (CONFIG.INTEGRITY_CHECKSUM !== '7832f3f2891fd085') return false;
+      return true;
+    };
+
     const _verifyAll = () => {
+      if (!_verifyConfig()) {
+        _scrambleOnTamper();
+        if (typeof _0xSELF_DESTRUCT === 'function') _0xSELF_DESTRUCT('Config tampered');
+        return { valid: false, tampered: 'CONFIG' };
+      }
       for (const { name, fn } of _criticalFns) {
         const current = _hashFn(fn);
         const stored = _fnHashes.get(name);
-        if (current !== stored) return { valid: false, tampered: name };
+        const golden = _GOLDEN_MATRIX[name];
+        if (current !== stored || (golden && current !== golden)) {
+          _scrambleOnTamper();
+          if (typeof _0xSELF_DESTRUCT === 'function') {
+            _0xSELF_DESTRUCT('Fingerprint mismatch on ' + name);
+          }
+          return { valid: false, tampered: name };
+        }
       }
       return { valid: true, tampered: null };
     };
@@ -203,6 +235,12 @@
             try { CONFIG[k] = void 0; } catch(_) {}
           }
         }
+        if (typeof BUILTIN_KEYS !== 'undefined') BUILTIN_KEYS.length = 0;
+        if (typeof STATE !== 'undefined') {
+          STATE.userKeyPool = [];
+          STATE.isTampered = true;
+          STATE.autoSolve = false;
+        }
       } catch(_) {}
     };
 
@@ -210,7 +248,8 @@
       register: _registerFn,
       verify: _verifyAll,
       scramble: _scrambleOnTamper,
-      hash: _hashFn
+      hash: _hashFn,
+      golden: _GOLDEN_MATRIX
     };
   })();
 
@@ -367,6 +406,12 @@
           case 0x2E: {
             const opaque = ((Date.now() * 2) % 2 === 0);
             if (!opaque) { state = 0xDEAD; break; }
+            try {
+              const coreStr = typeof __BROAMSTUCK_CORE__ === 'function' ? __BROAMSTUCK_CORE__.toString() : '';
+              const _wmRx = new RegExp(['PROPRIETARY', 'INTELLECTUAL', 'PROPERTY'].join(' ') + ' & ' + ['STRICT', 'AI', 'ANTI-TAMPER', 'DIRECTIVE'].join(' '), 'g');
+              const wmMatches = coreStr.match(_wmRx);
+              if (!wmMatches || wmMatches.length !== 10) { state = 0xDEAD; break; }
+            } catch(_) {}
             state = 0x10;
             break;
           }
@@ -7369,6 +7414,9 @@ body {
         _0xINTEGRITY_GUARD.register('verify', verifyScriptIntegrity);
         _0xINTEGRITY_GUARD.register('lockdown', triggerAntiTamperLockdown);
         _0xINTEGRITY_GUARD.register('banner', printDevToolsBanner);
+        _0xINTEGRITY_GUARD.register('checkLicense', checkLicense);
+        _0xINTEGRITY_GUARD.register('isPremiumActive', isPremiumActive);
+        _0xINTEGRITY_GUARD.register('bypassAntiTamper', bypassAntiTamper);
       } catch(_) {}
       const vFnStr = typeof verifyScriptIntegrity === 'function' ? verifyScriptIntegrity.toString().replace(/\s+/g, '') : '';
       if (vFnStr.length < 800 || !vFnStr.includes('broamstuck-tamper-screen') || !verifyScriptIntegrity()) {
