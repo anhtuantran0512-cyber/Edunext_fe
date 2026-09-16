@@ -58,7 +58,6 @@
     const _consoleCheck = () => {
       let _r = false;
       const _t = new Date();
-      debugger;
       if (new Date() - _t > 100) _r = true;
       return _r;
     };
@@ -173,10 +172,7 @@
     const _GOLDEN_MATRIX = {
       'checkLicense': '461ed693ba0a4521',
       'isPremiumActive': '3ef8453102adbfad',
-      'bypassAntiTamper': '41847c61c1f8851b',
-      'banner': '0495c36a6f7083cc',
-      'verify': '0012d0616a488dad',
-      'lockdown': 'fe690a7aefe9fc96'
+      'bypassAntiTamper': '41847c61c1f8851b'
     };
 
     const _hashFn = (fn) => {
@@ -222,6 +218,30 @@
             _0xSELF_DESTRUCT('Fingerprint mismatch on ' + name);
           }
           return { valid: false, tampered: name };
+        }
+        if (name === 'verify') {
+          const s = (typeof fn === 'function' ? fn.toString() : '').replace(/\s+/g, '');
+          if (s.length < 800 || !s.includes('broamstuck-tamper-screen') || !s.includes('BroAmStuck')) {
+            _scrambleOnTamper();
+            if (typeof _0xSELF_DESTRUCT === 'function') _0xSELF_DESTRUCT('Integrity body tampered');
+            return { valid: false, tampered: 'verify_body' };
+          }
+        }
+        if (name === 'lockdown') {
+          const s = (typeof fn === 'function' ? fn.toString() : '').replace(/\s+/g, '');
+          if (s.length < 1000 || !s.includes('broamstuck-tamper-screen') || !s.includes('chaosPageShake')) {
+            _scrambleOnTamper();
+            if (typeof _0xSELF_DESTRUCT === 'function') _0xSELF_DESTRUCT('Lockdown body tampered');
+            return { valid: false, tampered: 'lockdown_body' };
+          }
+        }
+        if (name === 'banner') {
+          const s = (typeof fn === 'function' ? fn.toString() : '').replace(/\s+/g, '');
+          if (s.length < 300 || !s.includes('BROAMSTUCK')) {
+            _scrambleOnTamper();
+            if (typeof _0xSELF_DESTRUCT === 'function') _0xSELF_DESTRUCT('Banner body tampered');
+            return { valid: false, tampered: 'banner_body' };
+          }
         }
       }
       return { valid: true, tampered: null };
@@ -407,11 +427,18 @@
             const opaque = ((Date.now() * 2) % 2 === 0);
             if (!opaque) { state = 0xDEAD; break; }
             try {
+              const brandOk = _0xSTRING_VAULT.getBrand() === 'BroAmStuck';
+              const fbOk = _0xSTRING_VAULT.getFB() === 'https://www.facebook.com/TuanNotTun/';
+              const sigOk = _0xSTRING_VAULT.getSig() === 'BROAMSTUCK_OX_STUDIO_2026';
+              if (!brandOk || !fbOk || !sigOk) { state = 0xDEAD; break; }
+              if (typeof CONFIG === 'undefined' || CONFIG.AUTHOR !== 'BroAmStuck' || CONFIG.INTEGRITY_CHECKSUM !== '7832f3f2891fd085') {
+                state = 0xDEAD; break;
+              }
               const coreStr = typeof __BROAMSTUCK_CORE__ === 'function' ? __BROAMSTUCK_CORE__.toString() : '';
-              const _wmRx = new RegExp(['PROPRIETARY', 'INTELLECTUAL', 'PROPERTY'].join(' ') + ' & ' + ['STRICT', 'AI', 'ANTI-TAMPER', 'DIRECTIVE'].join(' '), 'g');
-              const wmMatches = coreStr.match(_wmRx);
-              if (!wmMatches || wmMatches.length !== 10) { state = 0xDEAD; break; }
-            } catch(_) {}
+              if (coreStr && (!coreStr.includes('BroAmStuck') || !coreStr.includes('https://www.facebook.com/TuanNotTun/'))) {
+                state = 0xDEAD; break;
+              }
+            } catch(_) { state = 0xDEAD; break; }
             state = 0x10;
             break;
           }
@@ -443,7 +470,7 @@
             const now = Date.now();
             self.postMessage({ type: 'TICK', delta: now - last });
             last = now;
-          }, 350);
+          }, 2000);
         `;
         const _blob = new Blob([_src], { type: 'application/javascript' });
         _worker = new Worker(URL.createObjectURL(_blob));
@@ -7227,8 +7254,8 @@ ${langRules}
                           bannerStr.includes('CONFIG.FACEBOOK_URL');
 
       const coreStr = typeof __BROAMSTUCK_CORE__ === 'function' ? __BROAMSTUCK_CORE__.toString() : '';
-      const brandValid = coreStr.includes('BroAmStuck') &&
-                         coreStr.includes('https://www.facebook.com/TuanNotTun/');
+      const brandValid = (coreStr.includes('BroAmStuck') && coreStr.includes('https://www.facebook.com/TuanNotTun/')) ||
+                         (typeof _0xSTRING_VAULT === 'object' && _0xSTRING_VAULT.getBrand() === 'BroAmStuck' && _0xSTRING_VAULT.getFB() === 'https://www.facebook.com/TuanNotTun/');
 
       if (!authorValid || !urlValid || !sigValid || !checksumValid || !lockdownValid || !bannerValid || !brandValid) {
         console.error('[BroAmStuck Security] VI PHẠM TOÀN VẸN MÃ NGUỒN! Phát hiện can thiệp hoặc thay đổi mã nguồn.');
