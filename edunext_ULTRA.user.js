@@ -595,7 +595,22 @@
     s = s.replace(/\\mathrm\{([^}]*)\}/g, '$1');
     s = s.replace(/\\mathbf\{([^}]*)\}/g, '$1');
     s = s.replace(/\\mathit\{([^}]*)\}/g, '$1');
-    s = s.replace(/\\frac\{([^}]+)\}\{([^}]+)\}/g, '($1/$2)');
+    let changed = true, maxLoop = 6;
+    while (changed && maxLoop-- > 0) {
+      changed = false;
+      s = s.replace(/\\(?:d|c)?frac\{([^{}]*(?:\{[^{}]*\}[^{}]*)*)\}\{([^{}]*(?:\{[^{}]*\}[^{}]*)*)\}/g, (m, num, den) => {
+        changed = true;
+        return `(${num.trim()}/${den.trim()})`;
+      });
+    }
+    s = s.replace(/\\(?:d|c)?frac\s+([a-zA-Z0-9\+\-\*]+)\s+([a-zA-Z0-9\+\-\*]+)/g, '($1/$2)');
+    s = s.replace(/\\lim(?:\\limits)?(?:_\{([^}]+)\}|_([^\s]+))?/g, 'lim($1$2)');
+    s = s.replace(/\\to\b|\\rightarrow\b/g, '->');
+    s = s.replace(/\\infty\b/g, 'vô cùng');
+    s = s.replace(/\+\s*vô cùng/g, '+vô cùng');
+    s = s.replace(/\-\s*vô cùng/g, '-vô cùng');
+    s = s.replace(/\\(?:left|right|bigl|bigr|Bigl|Bigr)\s*([\|\(\)\[\]\{\}])/g, '$1');
+    s = s.replace(/\\vert\b|\\mid\b/g, '|');
     s = s.replace(/\\sqrt\{([^}]+)\}/g, 'sqrt($1)');
     s = s.replace(/\\sqrt\[([^\]]+)\]\{([^}]+)\}/g, 'root($1, $2)');
     s = s.replace(/\^\{\\circ\}\s*C|\^\\circ\s*C|\\circ\s*C|\\degree\s*C/gi, ' độ C');
@@ -618,8 +633,7 @@
     s = s.replace(/\\ge(?:q)?\b/g, '>=');
     s = s.replace(/\\neq?\b/g, '!=');
     s = s.replace(/\\approx\b/g, '≈');
-    s = s.replace(/\\rightarrow\b|\\to\b/g, '->');
-    s = s.replace(/\\(?:,|;|!|quad|qquad|displaystyle|limits|nolimits|left|right)\b/g, ' ');
+    s = s.replace(/\\(?:,|;|!|quad|qquad|displaystyle|limits|nolimits)\b/g, ' ');
     s = s.replace(/\\([a-zA-Z]+)/g, '$1');
     s = s.replace(/\{([^{}]+)\}/g, '$1');
     s = s.replace(/_([a-zA-Z0-9])/g, '$1');
@@ -630,17 +644,17 @@
   function reconstructLatexFormulas(container) {
     if (!container) return;
     try {
-      const katexEls = container.querySelectorAll('.katex');
-      for (const k of katexEls) {
+      const mathEls = container.querySelectorAll('.katex, [data-latex], annotation[encoding*="tex"], .math-inline, .math-display');
+      for (const k of mathEls) {
         try {
-          const annot = k.querySelector('annotation[encoding*="tex"]');
-          if (annot && annot.textContent && annot.textContent.trim()) {
-            const cleanMath = cleanLatexToPlain(annot.textContent);
+          const rawTex = k.getAttribute('data-latex') || (k.querySelector && k.querySelector('annotation[encoding*="tex"]')?.textContent) || (k.tagName === 'ANNOTATION' ? k.textContent : null);
+          if (rawTex && rawTex.trim()) {
+            const cleanMath = cleanLatexToPlain(rawTex);
             const textNode = document.createTextNode(` ${cleanMath} `);
             k.parentNode.replaceChild(textNode, k);
             continue;
           }
-          const mathml = k.querySelector('.katex-mathml');
+          const mathml = k.querySelector ? k.querySelector('.katex-mathml') : null;
           if (mathml && mathml.textContent && mathml.textContent.trim()) {
             const mText = cleanLatexToPlain(mathml.textContent);
             const textNode = document.createTextNode(` ${mText} `);
@@ -648,8 +662,22 @@
             continue;
           }
           const plainText = cleanLatexToPlain(k.textContent);
-          const textNode = document.createTextNode(` ${plainText} `);
-          k.parentNode.replaceChild(textNode, k);
+          if (plainText) {
+            const textNode = document.createTextNode(` ${plainText} `);
+            k.parentNode.replaceChild(textNode, k);
+          }
+        } catch (_) {}
+      }
+
+      const svgs = container.querySelectorAll('svg');
+      for (const svg of svgs) {
+        try {
+          const lbl = svg.getAttribute('aria-label') || svg.getAttribute('alt') || svg.getAttribute('data-latex') || (svg.querySelector('title') ? svg.querySelector('title').textContent : '');
+          if (lbl && lbl.trim()) {
+            const cleanLbl = cleanLatexToPlain(lbl);
+            const textNode = document.createTextNode(` ${cleanLbl} `);
+            svg.parentNode.replaceChild(textNode, svg);
+          }
         } catch (_) {}
       }
     } catch (_) {}
@@ -1062,7 +1090,13 @@
       SEND_BUTTON: '.w-send-btn',
       SEND_BUTTON_ACTIVE: '.w-send-btn--active',
       START_PROMPT_BTN: '.start-learning-prompt__button, .start-learning-prompt button',
-      LESSON_NEXT_BTN: '.quick-insert-btn.lesson-next-btn, .lesson-next-btn',
+      LESSON_LIST: '.w-lesson-list',
+      LESSON_ITEM: '.w-lesson-item, [id^="lesson-card-"]',
+      LESSON_ITEM_ACTIVE: '.w-lesson-item.w-lesson-item--active, .w-lesson-item.active, [id^="lesson-card-"].w-lesson-item--active',
+      LESSON_ITEM_TITLE: '.w-lesson-item__title',
+      LESSON_ITEM_COMPLETE: '.w-lesson-item__progress--complete',
+      LESSON_ITEM_NOT_STARTED: '.w-lesson-item__progress--not_started',
+      LESSON_NEXT_BTN: '.quick-insert-btn.lesson-next-btn, .lesson-next-btn, button.next-lesson, button.btn-next-lesson, a.next-lesson, .lesson-nav-next, .btn-next, .next-btn',
       SEGMENT: '.w-segment',
       SEGMENT_ACTIVE: '.w-segment--active',
       FULLSCREEN_LEFT: '.fullscreen-left-content',
@@ -1958,21 +1992,29 @@
           return;
         }
 
-        const nextBtn = document.querySelector(CONFIG.SELECTORS.LESSON_NEXT_BTN);
-        if (nextBtn && nextBtn.offsetParent !== null && !nextBtn.disabled && STATE.fsmState === FSM_STATE.IDLE) {
-          if (!STATE.nextLessonTimer) {
-            log('VISION', '🎉 Phát hiện nút "Học bài tiếp theo" - Tự động chuyển bài sau 3s...');
-            STATE.nextLessonTimer = setTimeout(() => {
+        const completionInfo = this.checkLessonCompletion();
+        if (completionInfo && STATE.autoSolve && (STATE.fsmState === FSM_STATE.IDLE || STATE.fsmState === FSM_STATE.EVALUATING)) {
+          if (!STATE.nextLessonTimer && STATE.lastLessonCompletedHandled !== completionInfo.text) {
+            STATE.lastLessonCompletedHandled = completionInfo.text;
+            log('VISION', '🎉 Chúc mừng em hoàn thành buổi học! Đang tự động chuyển bài tiếp theo sau 3s...');
+            playSuccessBeep();
+            sendDesktopNotification('EduNext Solver - Hoàn thành buổi học! 🎉', 'Chuẩn bị tự động chuyển bài học tiếp theo...');
+            STATE.nextLessonTimer = setTimeout(async () => {
               STATE.nextLessonTimer = null;
-              const btn = document.querySelector(CONFIG.SELECTORS.LESSON_NEXT_BTN);
-              if (btn && btn.offsetParent !== null && !btn.disabled) {
-                log('SYS', '🚀 Đang tự động click "Học bài tiếp theo"...');
-                btn.click();
-              }
+              await this.navigateToNextLesson();
             }, 3000);
           }
         } else {
-          if (STATE.nextLessonTimer) {
+          const nextBtn = document.querySelector(CONFIG.SELECTORS.LESSON_NEXT_BTN);
+          if (nextBtn && nextBtn.offsetParent !== null && !nextBtn.disabled && STATE.fsmState === FSM_STATE.IDLE && STATE.autoSolve) {
+            if (!STATE.nextLessonTimer) {
+              log('VISION', '🎉 Phát hiện nút "Học bài tiếp theo" - Tự động chuyển bài sau 3s...');
+              STATE.nextLessonTimer = setTimeout(async () => {
+                STATE.nextLessonTimer = null;
+                await this.navigateToNextLesson();
+              }, 3000);
+            }
+          } else if (!completionInfo && STATE.nextLessonTimer) {
             clearTimeout(STATE.nextLessonTimer);
             STATE.nextLessonTimer = null;
           }
@@ -1982,6 +2024,110 @@
           this.checkForNewContent();
         }
       }, CONFIG.HEARTBEAT_INTERVAL_MS);
+    },
+
+    checkLessonCompletion() {
+      const msgs = this.getChatMessages();
+      if (!msgs || msgs.length === 0) return null;
+      const recent = msgs.filter(m => m.role === 'assistant').slice(-4);
+      for (const m of recent) {
+        const t = m.text || '';
+        if (/chúc\s*mừng\s*em\s*hoàn\s*thành\s*buổi\s*học|hoàn\s*thành\s*buổi\s*học|hẹn\s*gặp\s*em\s*ở\s*buổi\s*học\s*tiếp\s*theo|điểm\s*buổi\s*học\s*:\s*\d+\s*\/\s*100|hoàn\s*thành\s*bài\s*học|kỷ\s*lục\s*chuỗi\s*đúng\s*liên\s*tiếp|buổi\s*học\s*kết\s*thúc/i.test(t)) {
+          return { completed: true, text: t, element: m.element };
+        }
+      }
+      return null;
+    },
+
+    async navigateToNextLesson() {
+      log('SYS', '🚀 Bắt đầu tiến trình tự động tìm và chuyển bài học mới...');
+      
+      const cards = Array.from(document.querySelectorAll(CONFIG.SELECTORS.LESSON_ITEM));
+      if (cards.length > 0) {
+        let activeIdx = cards.findIndex(c => c.classList.contains('w-lesson-item--active') || c.classList.contains('active') || c.getAttribute('aria-selected') === 'true');
+        if (activeIdx !== -1 && activeIdx < cards.length - 1) {
+          const nextCard = cards[activeIdx + 1];
+          const titleEl = nextCard.querySelector(CONFIG.SELECTORS.LESSON_ITEM_TITLE) || nextCard;
+          const title = sanitizeText(titleEl.textContent || `Bài #${activeIdx + 2}`);
+          log('SYS', `🚀 Chuyển sang bài tiếp theo trong danh sách: "${title}"`);
+          nextCard.click();
+          await this.handleAfterLessonSwitch();
+          return true;
+        }
+        const notStarted = cards.find(c => c.querySelector(CONFIG.SELECTORS.LESSON_ITEM_NOT_STARTED) || !c.querySelector(CONFIG.SELECTORS.LESSON_ITEM_COMPLETE));
+        if (notStarted && !notStarted.classList.contains('w-lesson-item--active')) {
+          const titleEl = notStarted.querySelector(CONFIG.SELECTORS.LESSON_ITEM_TITLE) || notStarted;
+          const title = sanitizeText(titleEl.textContent || 'Bài tiếp theo');
+          log('SYS', `🚀 Chuyển sang bài chưa hoàn thành: "${title}"`);
+          notStarted.click();
+          await this.handleAfterLessonSwitch();
+          return true;
+        }
+      }
+
+      const nextBtn = document.querySelector(CONFIG.SELECTORS.LESSON_NEXT_BTN);
+      if (nextBtn && nextBtn.offsetParent !== null && !nextBtn.disabled) {
+        log('SYS', '🚀 Click nút chuyển bài học (LESSON_NEXT_BTN)...');
+        nextBtn.click();
+        await this.handleAfterLessonSwitch();
+        return true;
+      }
+
+      const inlineBtns = Array.from(document.querySelectorAll('button, a, div[role="button"]'));
+      for (const btn of inlineBtns) {
+        if (btn.offsetParent === null || btn.disabled) continue;
+        const t = sanitizeText(btn.textContent || '').toLowerCase();
+        if (/^(?:học\s*)?bài\s*(?:học\s*)?tiếp\s*(?:theo)?$|buổi\s*học\s*tiếp\s*(?:theo)?|tiếp\s*tục\s*học|next\s*(?:lesson|activity)/i.test(t)) {
+          log('SYS', `🚀 Click nút inline: "${t}"`);
+          btn.click();
+          await this.handleAfterLessonSwitch();
+          return true;
+        }
+      }
+
+      const navSelectors = [
+        '.activity-item.active + .activity-item',
+        '.session-item.active + .session-item',
+        '.ant-menu-item-selected + .ant-menu-item',
+        '.list-group-item.active + .list-group-item',
+        '[class*="activity"].active + [class*="activity"]',
+        '[class*="lesson"].active + [class*="lesson"]',
+        'button[title*="tiếp" i]', 'button[aria-label*="next" i]',
+        '.btn-next', '.next-btn'
+      ];
+      for (const sel of navSelectors) {
+        const el = document.querySelector(sel);
+        if (el && el.offsetParent !== null && !el.disabled) {
+          log('SYS', '🚀 Chuyển bài qua cây điều hướng khóa học...');
+          el.click();
+          await this.handleAfterLessonSwitch();
+          return true;
+        }
+      }
+
+      log('VISION', '⚠️ Đã hoàn thành bài học nhưng chưa tìm thấy nút chuyển bài tiếp theo.', 'warn');
+      return false;
+    },
+
+    async handleAfterLessonSwitch() {
+      STATE.fsmState = FSM_STATE.IDLE;
+      STATE.currentQuestion = null;
+      STATE.currentAnswer = null;
+      STATE.retryCount = 0;
+      STATE.wrongAnswers = [];
+      STATE.activeQuestionCandidate = null;
+      STATE.lastAnsweredQuestionText = '';
+
+      await sleep(2500);
+
+      const startBtn = document.querySelector(CONFIG.SELECTORS.START_PROMPT_BTN) ||
+                       Array.from(document.querySelectorAll('button')).find(b => b.offsetParent !== null && !b.disabled && /bắt\s*đầu|sẵn\s*sàng/i.test(b.textContent || ''));
+      if (startBtn && startBtn.offsetParent !== null && !startBtn.disabled) {
+        log('VISION', '🚀 Tự động kích hoạt nút Bắt đầu / Sẵn sàng bài học mới!');
+        startBtn.click();
+        await sleep(1200);
+      }
+      this.checkForNewContent();
     },
 
     isBotThinking() {
@@ -2170,8 +2316,22 @@
       if (turnMsgs.length > 0) {
         const turnLastMsg = turnMsgs[turnMsgs.length - 1];
         const turnLastEl = turnLastMsg.element;
-        const turnCombinedRaw = turnMsgs.map(m => m.text).join('\n');
-        const cleanTurnText = this.extractCleanText(turnLastEl, turnCombinedRaw);
+        const turnTexts = turnMsgs.map(m => this.extractCleanText(m.element, m.text)).filter(t => t && t.length > 0);
+        let cleanTurnText = turnTexts.join('\n\n');
+
+        if (/^(?:x\s*[\.\,\:]?|\([0-9\w\-\+\/]+\)\s*bằng|trong\s*(?:hai|các)\s*hàm|hàm\s*này\s*(?:có)?)/i.test(cleanTurnText)) {
+          const allMsgs = this.getChatMessages();
+          for (let j = allMsgs.length - 1 - turnMsgs.length; j >= Math.max(0, allMsgs.length - 12); j--) {
+            const prevMsg = allMsgs[j];
+            if (prevMsg && prevMsg.role === 'assistant') {
+              const prevClean = this.extractCleanText(prevMsg.element, prevMsg.text);
+              if (/hàm\s*số|y\s*=|f\(x\)|g\(x\)|tiệm\s*cận|cực\s*trị|đạo\s*hàm/i.test(prevClean)) {
+                cleanTurnText = prevClean + '\n\n' + cleanTurnText;
+                break;
+              }
+            }
+          }
+        }
 
         if (cleanTurnText && cleanTurnText.length >= 5) {
           if (this.isReadyPrompt(cleanTurnText)) {
@@ -2449,8 +2609,11 @@
       t = t.replace(/\.(?:katex|math|ant-|w-)[a-zA-Z0-9_-]*/g, ' ');
       t = t.replace(/>\s*\.[a-zA-Z0-9_-]+/g, ' ');
       
+      t = t.replace(/Animation đang được tạo[\s\S]*/gi, '');
+      t = t.replace(/The failure of the limit sum rule[\s\S]*?(?:infinite|\n|$)/gi, '');
       t = t.replace(/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/g, '');
-      t = t.replace(/\b[0-9a-fA-F]{24}\b/g, '');
+      t = t.replace(/6a[0-9a-fA-F]{22}/g, '');
+      t = t.replace(/[0-9a-fA-F]{24}/g, '');
       t = t.replace(/\b\d{1,2}:\d{2}(?::\d{2})?\s+\d{1,2}\/\d{1,2}\/\d{4}\b/g, '');
       t = t.replace(/\b\d{1,2}\/\d{1,2}\/\d{4}\s+\d{1,2}:\d{2}(?::\d{2})?\b/g, '');
       t = t.replace(/\bINT:\s*ANS\b/g, '');
@@ -3092,7 +3255,7 @@
         .replace(/\n{3,}/g, '\n\n')
         .trim();
 
-      return fullText.substring(0, 6000);
+      return fullText.substring(0, 45000);
     },
 
     extractLessonContext() {
@@ -3324,10 +3487,19 @@ ${langRules}
    - MÔN VẬT LÝ (PHYSICS):
      + Nắm vững bản chất: Nhiệt học (Quy ước dấu Nguyên lý I Nhiệt động lực học ΔU = A + Q: khối khí sinh công A < 0, nhận công A > 0; tỏa nhiệt Q < 0, nhận nhiệt Q > 0; công thức thể tích V = V0(1 + alpha*t) với t là nhiệt độ Celsius, không được thay thẳng Kelvin), Cơ học, Điện từ, Quang học.
      + Phân biệt rõ bài toán tính toán vs bài toán phân tích lỗi sai trong lập luận (khi hỏi lỗi sai thì chỉ ra lỗi bản chất, không tính số).
-   - MÔN TOÁN HỌC (MATHEMATICS):
-     + Đại số, Giải tích, Hình học không gian, Tọa độ Oxyz, Xác suất & Thống kê chuẩn THPT.
-     + Lời giải trực diện, kết quả chính xác đến từng biểu thức/con số, viết phân số x/y, căn bậc hai sqrt().
-   - MÔN HÓA HỌC (CHEMISTRY):
+   - MÔN TOÁN HỌC (MATHEMATICS - LỚP 9, 10, 11, 12 CHUẨN BỘ GIÁO DỤC):
+      + Khảo sát hàm số (Đơn điệu, Cực trị, Giá trị lớn nhất/nhỏ nhất, Tiệm cận):
+        * Đơn điệu: Khoảng đồng biến (y' >= 0), nghịch biến (y' <= 0).
+        * Cực trị: x0 là điểm cực trị KHI VÀ CHỈ KHI y' ĐỔI DẤU qua x0. Lưu ý đặc biệt: Hàm y = x^3 có y' = 3x^2 >= 0 không đổi dấu nên KHÔNG CÓ CỰC TRỊ! Cực đại (đổi dấu + sang -), cực tiểu (đổi dấu - sang +).
+        * Tiệm cận đứng: Đường thẳng x = x0 nếu giới hạn một bên tiến ra vô cực. Với hàm phân thức tối giản y = P(x)/Q(x), nghiệm mẫu Q(x) = 0 là các đường tiệm cận đứng.
+        * Tiệm cận ngang: Đường thẳng y = y0 khi x tiến ra +vô cùng hoặc -vô cùng. Với y = (ax+b)/(cx+d), tiệm cận ngang là y = a/c, tiệm cận đứng là x = -d/c. Với y = sqrt(x^2+1)/x, có 2 tiệm cận ngang y = 1 (khi x -> +vô cùng) và y = -1 (khi x -> -vô cùng).
+        * Khoảng cách từ điểm M(x, f(x)) tới tiệm cận đứng x = x0 là MH = |x - x0|; tới tiệm cận ngang y = y0 là MH = |f(x) - y0|. Khi x tiến tới tiệm cận, MH tiến về 0.
+      + Tọa độ Oxyz, Hình học không gian, Nguyên hàm, Tích phân, Tổ hợp, Xác suất THPT.
+      + TUYỆT ĐỐI KHÔNG xuất phương án phỏng đoán "hoặc có thể là...", "hoặc tương tự...". BẮT BUỘC chỉ đưa ra DUY NHẤT 1 kết quả chuẩn xác nhất! Viết phân số (a/b), căn bậc hai sqrt().
+    - MÔN TIN HỌC (INFORMATICS):
+      + Ứng dụng AI trong y tế (IBM Watson for Oncology), khoa học, đời sống; đạo đức AI.
+      + Mạng máy tính (Router, Switch, IP, TCP/IP), HTML/CSS (thẻ danh sách, bảng, form), lập trình Python chuẩn THPT.
+    - MÔN HÓA HỌC (CHEMISTRY):
      + Áp dụng danh pháp IUPAC chuẩn SGK mới (methanol, ethanol, ethanoic acid, sulfuric acid, sulfur dioxide...).
      + Cân bằng đúng phản ứng, bảo toàn khối lượng, bảo toàn electron, viết công thức hóa học rõ ràng ở dạng văn bản (H2SO4, Fe2O3, Cu(OH)2...).
 4. ĐỊNH DẠNG ĐÁP ÁN:
@@ -3341,12 +3513,12 @@ ${langRules}
 
       if (qd.lessonContext && qd.lessonContext.length > 20) {
         const cleanCtx = qd.lessonContext.replace(/data:image\/[a-zA-Z0-9+\-\.]+;base64,[A-Za-z0-9+/=]+/g, '').replace(/!\[.*?\]\([^\)]+\)/g, '');
-        sys += `\n\nNỘI DUNG TÀI LIỆU BÀI HỌC (tham khảo):\n${cleanCtx.substring(0, 2500)}`;
+        sys += `\n\nNỘI DUNG TÀI LIỆU BÀI HỌC (tham khảo):\n${cleanCtx.substring(0, 35000)}`;
       }
 
       if (qd.bottomContext && qd.bottomContext.length > 5) {
         const cleanBtm = qd.bottomContext.replace(/data:image\/[a-zA-Z0-9+\-\.]+;base64,[A-Za-z0-9+/=]+/g, '').replace(/!\[.*?\]\([^\)]+\)/g, '');
-        sys += `\n\nTHÔNG TIN BỔ SUNG / DỮ KIỆN PHỤ TRỢ Ở PHÍA DƯỚI KHUNG CHAT:\n${cleanBtm}`;
+        sys += `\n\nTHÔNG TIN BỔ SUNG / DỮ KIỆN PHỤ TRỢ Ở PHÍA DƯỚI KHUNG CHAT:\n${cleanBtm.substring(0, 10000)}`;
       }
 
       if (qd.forbidNumerical || STATE.forbidNumericalAnswers) {
@@ -3375,9 +3547,12 @@ ${langRules}
 - Dựa trực tiếp vào các gợi ý đó để xác định ngay học thuyết / đáp án chính xác mà hệ thống đang hướng tới.
 - Tuyệt đối không chọn lại đáp án cũ! Nếu câu hỏi yêu cầu nhiều ý, phải liệt kê đầy đủ từng ý (1., 2., 3.).`;
       } else if (STATE.conversationHistory.length > 0) {
-        const recent = STATE.conversationHistory.slice(-2);
-        sys += '\n\nLỊCH SỬ CÂU HỎI VỪA HOÀN THÀNH:';
-        for (const h of recent) sys += `\n- Đã giải: ${h.question.substring(0, 100)}... -> Đáp: ${h.answer.substring(0, 50)}...`;
+        const recent = STATE.conversationHistory.slice(-6);
+        sys += `
+
+LỊCH SỬ CÁC CÂU HỎI VỪA HOÀN THÀNH TRONG BÀI HỌC (tham khảo tiến trình):`;
+        for (const h of recent) sys += `
+- Câu hỏi: ${h.question.substring(0, 180)}... -> Đáp án: ${h.answer.substring(0, 90)}`;
       }
 
       const wrongList = (STATE.wrongAnswers && STATE.wrongAnswers.length > 0)
