@@ -1,9 +1,11 @@
 // ==UserScript==
 // @name         EdUnExT_ULTRA
 // @namespace    https://edunext.fpt.edu.vn/
-// @version      2.0.0
+// @version      2.1.0
 // @description  AUTO Giải edunext bản prenium
 // @author       Edunext-FE
+// @updateURL    https://raw.githubusercontent.com/broamstuck-cybr/Edunext_fe/main/edunext_ULTRA.user.js
+// @downloadURL  https://raw.githubusercontent.com/broamstuck-cybr/Edunext_fe/main/edunext_ULTRA.user.js
 // @match        https://fsc-edunext.fpt.edu.vn/*
 // @match        https://edunext.fpt.edu.vn/*
 // @match        https://gemini.google.com/*
