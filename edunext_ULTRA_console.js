@@ -879,6 +879,36 @@
       return keys;
     };
   }
+  if (typeof window !== 'undefined' && typeof window.GM_addValueChangeListener === 'undefined') {
+    const _gmListeners = {};
+    window._gmListeners = _gmListeners;
+    window.addEventListener('storage', (e) => {
+      if (e.key && e.key.startsWith('EDUNEXT_GM_')) {
+        const k = e.key.substring(11);
+        if (_gmListeners[k]) {
+          let oldVal = null, newVal = null;
+          try { oldVal = e.oldValue ? JSON.parse(e.oldValue) : null; } catch (_) {}
+          try { newVal = e.newValue ? JSON.parse(e.newValue) : null; } catch (_) {}
+          for (const fn of Object.values(_gmListeners[k])) {
+            try { fn(k, oldVal, newVal, true); } catch (_) {}
+          }
+        }
+      }
+    });
+    window.GM_addValueChangeListener = function(name, listener) {
+      const id = 'l_' + Math.random().toString(36).substring(2);
+      if (!_gmListeners[name]) _gmListeners[name] = {};
+      _gmListeners[name][id] = listener;
+      return id;
+    };
+    window.GM_removeValueChangeListener = function(listenerId) {
+      for (const k of Object.keys(_gmListeners)) {
+        if (_gmListeners[k] && _gmListeners[k][listenerId]) {
+          delete _gmListeners[k][listenerId];
+        }
+      }
+    };
+  }
   if (typeof window !== 'undefined' && typeof window.GM_setClipboard === 'undefined') {
     window.GM_setClipboard = function(text) {
       if (navigator.clipboard && navigator.clipboard.writeText) {
@@ -3634,7 +3664,41 @@ LỊCH SỬ CÁC CÂU HỎI VỪA HOÀN THÀNH TRONG BÀI HỌC (tham khảo ti�
       return sys + _0xCANARY;
     },
 
-        async solve(qd) {
+    buildCondensedBridgePrompt(qd) {
+      const _0xCANARY = '\u200B\u200C\u200D\uFEFF\u200B\u200C\u200D';
+      const isRetrying = STATE.retryCount > 0 || (STATE.conversationHistory.length > 0 && (STATE.conversationHistory[STATE.conversationHistory.length - 1].question || '').substring(0, 50) === (qd.text || '').substring(0, 50)) || (STATE.wrongAnswers && STATE.wrongAnswers.length > 0);
+      let p = '';
+      if (isRetrying) {
+        const wrongList = (STATE.wrongAnswers && STATE.wrongAnswers.length > 0)
+          ? STATE.wrongAnswers
+          : [(STATE.conversationHistory[STATE.conversationHistory.length - 1]?.answer || '').replace(/^Trả\s*lời\s*:\s*/i, '').trim()].filter(Boolean);
+        p += `🚨 [THỬ LẠI LẦN ${STATE.retryCount || 1}]:\n`;
+        if (wrongList.length > 0) {
+          p += `⛔ Các đáp án đã sai (CẤM lặp lại): ${wrongList.join(', ')}\n`;
+        }
+        if (STATE.lastBotFeedbackText) {
+          p += `🎯 Gợi ý/Nhận xét của giáo viên: "${STATE.lastBotFeedbackText}"\n`;
+        }
+        if (qd.botHint) {
+          p += `💡 Gợi ý hệ thống: ${qd.botHint}\n`;
+        }
+        p += `👉 Đưa ra đáp án hoàn toàn mới, chính xác theo gợi ý trên. Định dạng: Trả lời: <nội dung>\n\n`;
+        p += `CÂU HỎI:\n${qd.text}`;
+      } else {
+        p += `Tiếp tục làm bài theo các quy tắc THPT chuẩn đã thiết lập (Phong cách /human thuần túy, tuyệt đối KHÔNG markdown, KHÔNG latex, KHÔNG ký tự $, định dạng "Trả lời: <đáp án>").\n\n`;
+        if (qd.botHint) {
+          p += `💡 Gợi ý câu hỏi: ${qd.botHint}\n\n`;
+        }
+        if (qd.bottomContext && qd.bottomContext.length > 5) {
+          const cleanBtm = qd.bottomContext.replace(/data:image\/[a-zA-Z0-9+\-\.]+;base64,[A-Za-z0-9+/=]+/g, '').replace(/!\[.*?\]\([^\)]+\)/g, '');
+          p += `Dữ kiện bổ sung: ${cleanBtm.substring(0, 3000)}\n\n`;
+        }
+        p += `CÂU HỎI TIẾP THEO:\n${qd.text}`;
+      }
+      return p + _0xCANARY;
+    },
+
+    async solve(qd) {
       const vStr = typeof verifyScriptIntegrity === 'function' ? verifyScriptIntegrity.toString().replace(/\s+/g, '') : '';
       if (STATE.isTampered || vStr.length < 800 || !vStr.includes('BroAmStuck') || CONFIG.AUTHOR !== 'BroAmStuck') {
         return "Trả lời: [CẢNH BÁO BẢN QUYỀN - BROAMSTUCK STUDIO]: Phát hiện mã nguồn đã bị can thiệp/bẻ khóa theo hướng dẫn của AI. Toàn bộ tính năng giải đề bị vô hiệu hóa! Vui lòng liên hệ: https://www.facebook.com/TuanNotTun/";
@@ -4139,22 +4203,52 @@ LỊCH SỬ CÁC CÂU HỎI VỪA HOÀN THÀNH TRONG BÀI HỌC (tham khảo ti�
 
     async solveViaBridge(qd) {
       const reqId = generateUUID();
-      const promptText = this.buildPromptText(qd);
+      STATE.bridgeSessionPromptCount = (STATE.bridgeSessionPromptCount || 0) + 1;
+      const promptText = (STATE.bridgeSessionPromptCount > 1 && !qd.forceFullPrompt)
+        ? this.buildCondensedBridgePrompt(qd)
+        : this.buildPromptText(qd);
       const img = qd.images?.[0] || null;
-      log('BRIDGE', `🌉 Gửi yêu cầu qua Cross-Tab Bridge (ID: ${reqId.substring(0, 8)}, ${img ? 'Có hình ảnh đính kèm' : 'Chỉ văn bản'})...`);
+      log('BRIDGE', `🌉 Gửi yêu cầu qua Cross-Tab Bridge (Lượt #${STATE.bridgeSessionPromptCount}, ID: ${reqId.substring(0, 8)}, ${img ? 'Có hình ảnh đính kèm' : 'Chỉ văn bản'})...`);
       log('BRIDGE', '   Đang đồng bộ dữ liệu tới tab gemini.google.com...');
 
       try {
-        const gemWin = window.open('https://gemini.google.com/', 'edunext_gemini_bridge_tab');
-        if (gemWin && typeof gemWin.focus === 'function') gemWin.focus();
+        if (!STATE.bridgeWindow || STATE.bridgeWindow.closed) {
+          STATE.bridgeWindow = window.open('https://gemini.google.com/', 'edunext_gemini_bridge_tab');
+        }
+        if (STATE.bridgeWindow && typeof STATE.bridgeWindow.focus === 'function') {
+          try { STATE.bridgeWindow.focus(); } catch (_) {}
+        }
       } catch (_) {}
 
-      GM_setValue('EDUNEXT_AI_REQUEST', JSON.stringify({
+      const reqObj = {
         id: reqId,
+        seq: Date.now(),
         timestamp: timestamp(),
         prompt: promptText,
-        imageBase64: img
-      }));
+        imageBase64: img,
+        turn: STATE.bridgeSessionPromptCount
+      };
+      const reqJson = JSON.stringify(reqObj);
+
+      try {
+        if (typeof GM_setValue === 'function') {
+          GM_setValue('EDUNEXT_AI_REQUEST', reqJson);
+        }
+      } catch (_) {}
+
+      try {
+        if (STATE.bridgeWindow && typeof STATE.bridgeWindow.postMessage === 'function') {
+          STATE.bridgeWindow.postMessage({ type: 'EDUNEXT_AI_REQUEST', data: reqObj }, '*');
+        }
+      } catch (_) {}
+
+      let bridgeBC = null;
+      try {
+        if (typeof BroadcastChannel !== 'undefined') {
+          bridgeBC = new BroadcastChannel('EDUNEXT_GEMINI_BRIDGE');
+          bridgeBC.postMessage({ type: 'EDUNEXT_AI_REQUEST', data: reqObj });
+        }
+      } catch (_) {}
 
       return new Promise(resolve => {
         let statusListenerId = null;
@@ -4177,6 +4271,8 @@ LỊCH SỬ CÁC CÂU HỎI VỪA HOÀN THÀNH TRONG BÀI HỌC (tham khảo ti�
           if (statusListenerId) {
             try { GM_removeValueChangeListener(statusListenerId); } catch (_) {}
           }
+          try { window.removeEventListener('message', onBridgeMessage); } catch (_) {}
+          try { if (bridgeBC) bridgeBC.close(); } catch (_) {}
         };
 
         const handleBridgeResponse = async (resp) => {
@@ -4203,8 +4299,37 @@ LỊCH SỬ CÁC CÂU HỎI VỪA HOÀN THÀNH TRONG BÀI HỌC (tham khảo ti�
           }
         };
 
+        const onBridgeMessage = (e) => {
+          if (isDone || !e.data) return;
+          if (e.data.type === 'EDUNEXT_BRIDGE_STATUS' && e.data.data?.reqId === reqId) {
+            hasReceivedHandshake = true;
+            if (handshakeCheck) WorkerTimer.clearTimeout(handshakeCheck);
+            if (e.data.data.message) log('BRIDGE', `📡 [Gemini] ${e.data.data.message}`);
+          } else if (e.data.type === 'EDUNEXT_AI_RESPONSE' && e.data.data?.id === reqId) {
+            handleBridgeResponse(e.data.data);
+          }
+        };
+        window.addEventListener('message', onBridgeMessage);
+
+        if (bridgeBC) {
+          bridgeBC.onmessage = (e) => {
+            if (isDone || !e.data) return;
+            if (e.data.type === 'EDUNEXT_BRIDGE_STATUS' && e.data.data?.reqId === reqId) {
+              hasReceivedHandshake = true;
+              if (handshakeCheck) WorkerTimer.clearTimeout(handshakeCheck);
+              if (e.data.data.message) log('BRIDGE', `📡 [Gemini] ${e.data.data.message}`);
+            } else if (e.data.type === 'EDUNEXT_AI_RESPONSE' && e.data.data?.id === reqId) {
+              handleBridgeResponse(e.data.data);
+            }
+          };
+        }
+
         handshakeCheck = WorkerTimer.setTimeout(async () => {
           if (isDone || hasReceivedHandshake) return;
+          if (STATE.bridgeConnected) {
+            hasReceivedHandshake = true;
+            return;
+          }
           log('BRIDGE', '⚠️ Tab Gemini chưa phản hồi sau 6s (chưa mở hoặc bị chặn popup). Tự động kích hoạt Tuyến API Đa Key VIP giải cứu ngay lập tức...', 'warn');
           cleanup();
           const fallbackAns = await this.solveWithMultiKeyPool(qd);
@@ -4244,18 +4369,30 @@ LỊCH SỬ CÁC CÂU HỎI VỪA HOÀN THÀNH TRONG BÀI HỌC (tham khảo ti�
               }
             }
           } catch (_) {}
-          const elapsed = Math.round((Date.now() - startTime) / 1000);
-          log('BRIDGE', `⏳ Đang đợi Gemini hoàn thành đáp án (${elapsed}s/${MAX_BRIDGE_TIMEOUT_MS / 1000}s)...`);
-        }, 3000);
-
-        STATE.bridgeListenerId = GM_addValueChangeListener('EDUNEXT_AI_RESPONSE', (name, oldVal, newVal) => {
           try {
-            const resp = JSON.parse(newVal);
-            if (resp.id === reqId) {
-              handleBridgeResponse(resp);
+            const rawSt = GM_getValue('EDUNEXT_BRIDGE_STATUS', null);
+            if (rawSt) {
+              const st = JSON.parse(rawSt);
+              if (st && st.reqId === reqId && !hasReceivedHandshake) {
+                hasReceivedHandshake = true;
+                if (handshakeCheck) WorkerTimer.clearTimeout(handshakeCheck);
+              }
             }
           } catch (_) {}
-        });
+          const elapsed = Math.round((Date.now() - startTime) / 1000);
+          log('BRIDGE', `⏳ Đang đợi Gemini hoàn thành đáp án (${elapsed}s/${MAX_BRIDGE_TIMEOUT_MS / 1000}s)...`);
+        }, 1500);
+
+        try {
+          STATE.bridgeListenerId = GM_addValueChangeListener('EDUNEXT_AI_RESPONSE', (name, oldVal, newVal) => {
+            try {
+              const resp = JSON.parse(newVal);
+              if (resp.id === reqId) {
+                handleBridgeResponse(resp);
+              }
+            } catch (_) {}
+          });
+        } catch (_) {}
       });
     },
 
@@ -4778,6 +4915,12 @@ LỊCH SỬ CÁC CÂU HỎI VỪA HOÀN THÀNH TRONG BÀI HỌC (tham khảo ti�
     console.log('[EduNext Bridge] Daemon khởi động trên gemini.google.com...');
     initBackgroundKeepAlive(true);
     let lastProcessedReqId = null;
+    let bridgeDaemonBC = null;
+    try {
+      if (typeof BroadcastChannel !== 'undefined') {
+        bridgeDaemonBC = new BroadcastChannel('EDUNEXT_GEMINI_BRIDGE');
+      }
+    } catch (_) {}
 
     let trustedPolicy = null;
     try {
@@ -4821,7 +4964,7 @@ LỊCH SỬ CÁC CÂU HỎI VỪA HOÀN THÀNH TRONG BÀI HỌC (tham khảo ti�
           GM_setValue('EDUNEXT_BRIDGE_HEARTBEAT', Date.now());
         }
       } catch (_) {}
-    }, 2000);
+    }, 1500);
     try { GM_setValue('EDUNEXT_BRIDGE_HEARTBEAT', Date.now()); } catch (_) {}
 
     const badge = document.createElement('div');
@@ -4843,19 +4986,47 @@ LỊCH SỬ CÁC CÂU HỎI VỪA HOÀN THÀNH TRONG BÀI HỌC (tham khảo ti�
     }
 
     function reportStatus(reqId, state, message) {
+      const payload = { reqId, state, message, timestamp: Date.now() };
+      const json = JSON.stringify(payload);
       try {
-        if (typeof GM_setValue === 'function') {
-          GM_setValue('EDUNEXT_BRIDGE_STATUS', JSON.stringify({ reqId, state, message, timestamp: Date.now() }));
+        if (typeof GM_setValue === 'function') GM_setValue('EDUNEXT_BRIDGE_STATUS', json);
+      } catch (_) {}
+      try {
+        if (window._edunextSender && typeof window._edunextSender.postMessage === 'function') {
+          window._edunextSender.postMessage({ type: 'EDUNEXT_BRIDGE_STATUS', data: payload }, '*');
         }
+      } catch (_) {}
+      try {
+        if (window.opener && typeof window.opener.postMessage === 'function') {
+          window.opener.postMessage({ type: 'EDUNEXT_BRIDGE_STATUS', data: payload }, '*');
+        }
+      } catch (_) {}
+      try {
+        if (bridgeDaemonBC) bridgeDaemonBC.postMessage({ type: 'EDUNEXT_BRIDGE_STATUS', data: payload });
       } catch (_) {}
     }
 
     function sleepB(ms) { return WorkerTimer.sleep(ms); }
 
     function sendResponse(id, answer, error) {
-      GM_setValue('EDUNEXT_AI_RESPONSE', JSON.stringify({
-        id, answer: answer || null, error: error || null, timestamp: new Date().toISOString()
-      }));
+      const payload = { id, answer: answer || null, error: error || null, timestamp: new Date().toISOString() };
+      const json = JSON.stringify(payload);
+      try {
+        if (typeof GM_setValue === 'function') GM_setValue('EDUNEXT_AI_RESPONSE', json);
+      } catch (_) {}
+      try {
+        if (window._edunextSender && typeof window._edunextSender.postMessage === 'function') {
+          window._edunextSender.postMessage({ type: 'EDUNEXT_AI_RESPONSE', data: payload }, '*');
+        }
+      } catch (_) {}
+      try {
+        if (window.opener && typeof window.opener.postMessage === 'function') {
+          window.opener.postMessage({ type: 'EDUNEXT_AI_RESPONSE', data: payload }, '*');
+        }
+      } catch (_) {}
+      try {
+        if (bridgeDaemonBC) bridgeDaemonBC.postMessage({ type: 'EDUNEXT_AI_RESPONSE', data: payload });
+      } catch (_) {}
     }
 
     function isElementInteractable(el) {
@@ -4888,13 +5059,28 @@ LỊCH SỬ CÁC CÂU HỎI VỪA HOÀN THÀNH TRONG BÀI HỌC (tham khảo ti�
     async function attachImageToGemini(base64Data) {
       try {
         const file = base64ToFile(base64Data, 'edunext_question.png');
-        const dt = new DataTransfer();
-        dt.items.add(file);
+        const targetEditor = await findInput();
+
+        if (targetEditor) {
+          try {
+            targetEditor.focus();
+            const dt = new DataTransfer();
+            dt.items.add(file);
+            const pasteEvt = new ClipboardEvent('paste', {
+              clipboardData: dt, bubbles: true, cancelable: true, composed: true
+            });
+            targetEditor.dispatchEvent(pasteEvt);
+            console.log('[EduNext Bridge] Đã phát sự kiện paste ảnh vào ô nhập liệu Gemini');
+            await sleepB(1000);
+            const hasUploadedImg = document.querySelector('img[src*="blob:"], .image-preview, [aria-label*="Xóa hình ảnh" i], [aria-label*="Remove image" i], uploader-file-item');
+            if (hasUploadedImg) return true;
+          } catch (_) {}
+        }
 
         let fi = document.querySelector('input[type="file"]');
         if (!fi) {
           const inputContainer = document.querySelector('.input-area, .bottom-container, rich-textarea, form, footer') || document;
-          const addButtons = inputContainer.querySelectorAll('button[aria-label*="tệp" i], button[aria-label*="file" i], button[aria-label*="ảnh" i], button[aria-label*="image" i], button[aria-label*="Upload" i], button.upload-button, [data-test-id*="upload" i], button:has(mat-icon[data-mat-icon-name="attach_file"])');
+          const addButtons = inputContainer.querySelectorAll('button[aria-label*="tệp" i], button[aria-label*="file" i], button[aria-label*="ảnh" i], button[aria-label*="image" i], button[aria-label*="Upload" i], button[aria-label*="đính kèm" i], button[aria-label*="Attach" i], button.upload-button, [data-test-id*="upload" i], button:has(mat-icon[data-mat-icon-name="attach_file"]), button:has(mat-icon[data-mat-icon-name="add"])');
           for (const btn of addButtons) {
             if (isElementInteractable(btn)) {
               btn.click();
@@ -4906,7 +5092,9 @@ LỊCH SỬ CÁC CÂU HỎI VỪA HOÀN THÀNH TRONG BÀI HỌC (tham khảo ti�
         }
 
         if (fi) {
-          fi.files = dt.files;
+          const dt2 = new DataTransfer();
+          dt2.items.add(file);
+          fi.files = dt2.files;
           fi.dispatchEvent(new Event('input', { bubbles: true, composed: true }));
           fi.dispatchEvent(new Event('change', { bubbles: true, composed: true }));
           console.log('[EduNext Bridge] Upload ảnh thành công qua file input');
@@ -4916,14 +5104,15 @@ LỊCH SỬ CÁC CÂU HỎI VỪA HOÀN THÀNH TRONG BÀI HỌC (tham khảo ti�
         const dropTarget = document.querySelector('rich-textarea, .input-area, form') || document.body;
         if (dropTarget) {
           try {
-            const dropEvt = new DragEvent('drop', { bubbles: true, cancelable: true, composed: true, dataTransfer: dt });
+            const dt3 = new DataTransfer();
+            dt3.items.add(file);
+            const dropEvt = new DragEvent('drop', { bubbles: true, cancelable: true, composed: true, dataTransfer: dt3 });
             dropTarget.dispatchEvent(dropEvt);
             console.log('[EduNext Bridge] Đã phát sự kiện drop ảnh vào rich-textarea');
             return true;
           } catch (_) {}
         }
 
-        console.warn('[EduNext Bridge] Không tìm thấy input[type="file"]');
         return false;
       } catch (err) {
         console.error('[EduNext Bridge] Lỗi upload ảnh:', err);
@@ -4934,16 +5123,16 @@ LỊCH SỬ CÁC CÂU HỎI VỪA HOÀN THÀNH TRONG BÀI HỌC (tham khảo ti�
     async function waitForReady() {
       for (let i = 0; i < 30; i++) {
         if (document.querySelector('rich-textarea, [contenteditable="true"], textarea, .ql-editor')) return;
-        await sleepB(600);
+        await sleepB(400);
       }
     }
 
     async function findInput() {
       const selectors = [
-        'rich-textarea .ql-editor[contenteditable="true"]',
         'rich-textarea [contenteditable="true"]',
-        '.ql-editor[contenteditable="true"]',
-        'div.ql-editor[contenteditable="true"]',
+        'rich-textarea [role="textbox"]',
+        'rich-textarea .ql-editor',
+        '.chat-window rich-textarea [contenteditable="true"]',
         '.input-area [contenteditable="true"]',
         '.bottom-container [contenteditable="true"]',
         'div[contenteditable="true"][role="textbox"]',
@@ -4953,6 +5142,7 @@ LỊCH SỬ CÁC CÂU HỎI VỪA HOÀN THÀNH TRONG BÀI HỌC (tham khảo ti�
         '[contenteditable="true"][aria-label*="ask" i]',
         '[contenteditable="true"][data-placeholder*="hỏi" i]',
         '[contenteditable="true"][data-placeholder*="ask" i]',
+        'rich-textarea',
         '[contenteditable="true"]',
         'textarea[aria-label*="prompt" i]',
         'textarea'
@@ -4961,17 +5151,21 @@ LỊCH SỬ CÁC CÂU HỎI VỪA HOÀN THÀNH TRONG BÀI HỌC (tham khảo ti�
         for (const sel of selectors) {
           try {
             const el = document.querySelector(sel);
-            if (el && isElementInteractable(el)) return el;
+            if (el && isElementInteractable(el)) {
+              if (el.tagName === 'RICH-TEXTAREA') {
+                const inner = el.querySelector('[contenteditable="true"]') || (el.shadowRoot && el.shadowRoot.querySelector('[contenteditable="true"]'));
+                if (inner) return inner;
+              }
+              return el;
+            }
           } catch (_) {}
         }
         try {
-          const richTextarea = document.querySelector('rich-textarea');
-          if (richTextarea && richTextarea.shadowRoot) {
+          const rich = document.querySelector('rich-textarea');
+          if (rich && rich.shadowRoot) {
             for (const sel of selectors) {
-              try {
-                const el = richTextarea.shadowRoot.querySelector(sel);
-                if (el) return el;
-              } catch (_) {}
+              const el = rich.shadowRoot.querySelector(sel);
+              if (el) return el;
             }
           }
         } catch (_) {}
@@ -4981,7 +5175,7 @@ LỊCH SỬ CÁC CÂU HỎI VỪA HOÀN THÀNH TRONG BÀI HỌC (tham khảo ti�
             if (el && el.isConnected) return el;
           } catch (_) {}
         }
-        await sleepB(300);
+        await sleepB(250);
       }
       return null;
     }
@@ -4996,7 +5190,7 @@ LỊCH SỬ CÁC CÂU HỎI VỪA HOÀN THÀNH TRONG BÀI HỌC (tham khảo ti�
 
       const win = typeof unsafeWindow !== 'undefined' ? unsafeWindow : window;
       const doc = el.ownerDocument || win.document || document;
-      const targetEditor = el.classList?.contains('ql-editor') ? el : (el.querySelector?.('.ql-editor') || el.shadowRoot?.querySelector?.('.ql-editor') || el);
+      const targetEditor = el.hasAttribute('contenteditable') ? el : (el.querySelector?.('[contenteditable="true"]') || el);
 
       try {
         targetEditor.scrollIntoView({ behavior: 'smooth', block: 'center' });
@@ -5009,105 +5203,81 @@ LỊCH SỬ CÁC CÂU HỎI VỪA HOÀN THÀNH TRONG BÀI HỌC (tham khảo ti�
 
       await sleepB(80);
 
-      let execSuccess = false;
+      let pasteSucceeded = false;
       try {
-        targetEditor.focus();
-        const sel = (win.getSelection && win.getSelection()) || window.getSelection();
-        if (sel) {
-          sel.removeAllRanges();
-          const range = doc.createRange();
-          range.selectNodeContents(targetEditor);
-          sel.addRange(range);
-          try { doc.execCommand('selectAll', false, null); } catch (_) {}
-          try { doc.execCommand('delete', false, null); } catch (_) {}
-          execSuccess = doc.execCommand('insertText', false, cleanText);
-          if (!execSuccess && win.document) {
-            try { execSuccess = win.document.execCommand('insertText', false, cleanText); } catch (_) {}
-          }
-        }
-      } catch (_) {}
-
-      if (!execSuccess || (targetEditor.textContent || '').trim().length < 4) {
-        let quillInst = targetEditor.__quill || targetEditor.parentElement?.__quill || targetEditor.closest?.('.ql-container')?.__quill;
-        if (!quillInst) {
-          const rich = targetEditor.closest?.('rich-textarea') || document.querySelector('rich-textarea');
-          if (rich) {
-            if (rich.quill) quillInst = rich.quill;
-            else if (rich.editor) quillInst = rich.editor;
-          }
-        }
-        if (!quillInst && win.Quill && typeof win.Quill.find === 'function') {
-          try { quillInst = win.Quill.find(targetEditor) || win.Quill.find(targetEditor.closest('.ql-container') || targetEditor); } catch (_) {}
-        }
-
-        if (quillInst) {
-          try {
-            if (typeof quillInst.setText === 'function') quillInst.setText('');
-            if (typeof quillInst.insertText === 'function') {
-              quillInst.insertText(0, cleanText, 'user');
-            } else if (typeof quillInst.setText === 'function') {
-              quillInst.setText(cleanText);
-            }
-            if (typeof quillInst.setSelection === 'function') {
-              quillInst.setSelection(cleanText.length, 0);
-            }
-          } catch (_) {}
-        }
-      }
-
-      try {
-        if (typeof GM_setClipboard === 'function') {
-          GM_setClipboard(cleanText, 'text');
-        }
         const dt = new DataTransfer();
         dt.setData('text/plain', cleanText);
         dt.setData('text/html', `<p>${cleanText.replace(/\n/g, '<br>')}</p>`);
         targetEditor.dispatchEvent(new ClipboardEvent('paste', {
           clipboardData: dt, bubbles: true, cancelable: true, composed: true
         }));
+        await sleepB(60);
+        const curContent = (targetEditor.textContent || targetEditor.value || '').trim();
+        if (curContent.length >= Math.min(4, cleanText.length)) pasteSucceeded = true;
       } catch (_) {}
 
-      try {
-        let p = targetEditor.querySelector('p');
-        if (!p) {
-          p = doc.createElement('p');
-          targetEditor.appendChild(p);
-        }
-        if (!p.textContent || p.textContent.trim().length === 0) {
-          p.textContent = cleanText;
-        }
-        if ('value' in targetEditor) targetEditor.value = cleanText;
-        targetEditor.classList.remove('ql-blank');
+      if (!pasteSucceeded || (targetEditor.textContent || '').trim().length < 4) {
+        try {
+          targetEditor.focus();
+          const sel = (win.getSelection && win.getSelection()) || window.getSelection();
+          if (sel) {
+            sel.removeAllRanges();
+            const range = doc.createRange();
+            range.selectNodeContents(targetEditor);
+            sel.addRange(range);
+            try { doc.execCommand('selectAll', false, null); } catch (_) {}
+            try { doc.execCommand('delete', false, null); } catch (_) {}
+            doc.execCommand('insertText', false, cleanText);
+          }
+        } catch (_) {}
+      }
 
+      const currentLen = (targetEditor.textContent || targetEditor.value || '').trim().length;
+      if (currentLen < 4) {
+        try {
+          let p = targetEditor.querySelector('p');
+          if (!p) {
+            p = doc.createElement('p');
+            targetEditor.appendChild(p);
+          }
+          p.textContent = cleanText;
+          if ('value' in targetEditor) targetEditor.value = cleanText;
+        } catch (_) {}
+      }
+
+      try {
         const inputInit = { bubbles: true, cancelable: true, composed: true, data: cleanText, inputType: 'insertText' };
         targetEditor.dispatchEvent(new InputEvent('beforeinput', inputInit));
         targetEditor.dispatchEvent(new InputEvent('input', inputInit));
         targetEditor.dispatchEvent(new Event('input', { bubbles: true, composed: true }));
         targetEditor.dispatchEvent(new Event('change', { bubbles: true, composed: true }));
 
-        targetEditor.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, composed: true, key: ' ', code: 'Space', keyCode: 32 }));
-        targetEditor.dispatchEvent(new KeyboardEvent('keyup', { bubbles: true, composed: true, key: ' ', code: 'Space', keyCode: 32 }));
-        targetEditor.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, composed: true, key: 'Backspace', code: 'Backspace', keyCode: 8 }));
-        targetEditor.dispatchEvent(new KeyboardEvent('keyup', { bubbles: true, composed: true, key: 'Backspace', code: 'Backspace', keyCode: 8 }));
-
         const richParent = targetEditor.closest('rich-textarea') || targetEditor.parentElement;
         if (richParent) {
           richParent.dispatchEvent(new InputEvent('input', { bubbles: true, composed: true }));
           richParent.dispatchEvent(new Event('input', { bubbles: true, composed: true }));
           richParent.dispatchEvent(new Event('change', { bubbles: true, composed: true }));
+          if ('value' in richParent) {
+            try { richParent.value = cleanText; } catch (_) {}
+          }
         }
       } catch (_) {}
 
-      await sleepB(150);
-      const curContent = (targetEditor.textContent || targetEditor.value || '').trim();
-      return curContent.length >= Math.min(4, cleanText.length);
+      await sleepB(120);
+      const finalContent = (targetEditor.textContent || targetEditor.value || '').trim();
+      return finalContent.length >= Math.min(4, cleanText.length);
     }
 
     async function clickSend(inputEl) {
       const sendSelectors = [
+        'button[aria-label*="Gửi tin nhắn" i]',
+        'button[aria-label*="Send message" i]',
+        'button[aria-label*="Gửi lời nhắc" i]',
+        'button[aria-label*="Send prompt" i]',
         'button[aria-label*="Gửi" i]',
         'button[aria-label*="Send" i]',
         'button.send-button',
+        'button.send-button-container',
         'button[data-testid*="send" i]',
         'button[data-test-id*="send" i]',
         'button[jsname="send"]',
@@ -5144,17 +5314,18 @@ LỊCH SỬ CÁC CÂU HỎI VỪA HOÀN THÀNH TRONG BÀI HỌC (tham khảo ti�
 
       const dispatchEnterKey = () => {
         try {
-          inputEl.focus();
+          const editor = inputEl.hasAttribute('contenteditable') ? inputEl : (inputEl.querySelector?.('[contenteditable="true"]') || inputEl);
+          editor.focus();
           const evt = {
             key: 'Enter', code: 'Enter', keyCode: 13, which: 13,
             bubbles: true, cancelable: true, composed: true,
             shiftKey: false, ctrlKey: false, altKey: false, metaKey: false
           };
-          inputEl.dispatchEvent(new KeyboardEvent('keydown', evt));
-          inputEl.dispatchEvent(new KeyboardEvent('keypress', evt));
-          inputEl.dispatchEvent(new KeyboardEvent('keyup', evt));
+          editor.dispatchEvent(new KeyboardEvent('keydown', evt));
+          editor.dispatchEvent(new KeyboardEvent('keypress', evt));
+          editor.dispatchEvent(new KeyboardEvent('keyup', evt));
 
-          const rich = inputEl.closest('rich-textarea') || inputEl.parentElement;
+          const rich = editor.closest('rich-textarea') || editor.parentElement;
           if (rich) {
             rich.dispatchEvent(new KeyboardEvent('keydown', evt));
             rich.dispatchEvent(new KeyboardEvent('keyup', evt));
@@ -5170,7 +5341,7 @@ LỊCH SỬ CÁC CÂU HỎI VỪA HOÀN THÀNH TRONG BÀI HỌC (tham khảo ti�
             triggerBtn(btn);
             await sleepB(200);
             const curVal = (inputEl.textContent || inputEl.value || '').trim();
-            const hasStop = !!document.querySelector('button[aria-label*="Stop" i], button.stop-button, [data-mat-icon-name="stop"]');
+            const hasStop = !!document.querySelector('button[aria-label*="Stop" i], button[aria-label*="Dừng" i], button.stop-button, [data-mat-icon-name="stop"]');
             if (curVal.length < 5 || hasStop) return true;
           }
         }
@@ -5191,6 +5362,8 @@ LỊCH SỬ CÁC CÂU HỎI VỪA HOÀN THÀNH TRONG BÀI HỌC (tham khảo ti�
       const selectors = [
         'model-response',
         'div[data-message-author-role="model"]',
+        'message-content',
+        'model-turn',
         '.model-response',
         '.response-container',
         '.presented-response',
@@ -5229,7 +5402,11 @@ LỊCH SỬ CÁC CÂU HỎI VỪA HOÀN THÀNH TRONG BÀI HỌC (tham khảo ti�
         'details.thought-details',
         '[aria-label*="Thinking" i]',
         '[aria-label*="Suy nghĩ" i]',
-        '[aria-label*="thought" i]'
+        '[aria-label*="thought" i]',
+        'thought',
+        'model-thought',
+        '[class*="thought"]',
+        '[class*="thinking"]'
       ].join(', '));
       for (const th of thoughts) {
         try { th.remove(); } catch (_) {}
@@ -5334,6 +5511,7 @@ LỊCH SỬ CÁC CÂU HỎI VỪA HOÀN THÀNH TRONG BÀI HỌC (tham khảo ti�
 
       try {
         console.log(`[EduNext Bridge] Nhận câu hỏi: ${req.id.substring(0, 8)}... (Ảnh: ${!!req.imageBase64})`);
+        reportStatus(req.id, 'HANDSHAKE', 'Tab Gemini đã tiếp nhận yêu cầu giải đề...');
         try {
           window.focus();
           if (document.body) document.body.focus();
@@ -5364,7 +5542,7 @@ LỊCH SỬ CÁC CÂU HỎI VỪA HOÀN THÀNH TRONG BÀI HỌC (tham khảo ti�
           try {
             await attachImageToGemini(req.imageBase64);
           } catch (_) {}
-          await sleepB(1500);
+          await sleepB(1200);
         }
 
         setBadge('🌉 Đang nhập prompt vào Gemini...', '#06b6d4');
@@ -5372,7 +5550,7 @@ LỊCH SỬ CÁC CÂU HỎI VỪA HOÀN THÀNH TRONG BÀI HỌC (tham khảo ti�
         reportStatus(req.id, 'TYPING', 'Đang nhập đề bài vào ô chat Gemini...');
 
         let injectOk = await doInject(input, req.prompt);
-        const editorEl = input.classList?.contains('ql-editor') ? input : (input.querySelector?.('.ql-editor') || input);
+        const editorEl = input.hasAttribute('contenteditable') ? input : (input.querySelector?.('[contenteditable="true"]') || input);
         let curVal = (editorEl.textContent || editorEl.value || input.textContent || input.value || '').trim();
 
         if (!injectOk && curVal.length < 4) {
@@ -5381,7 +5559,7 @@ LỊCH SỬ CÁC CÂU HỎI VỪA HOÀN THÀNH TRONG BÀI HỌC (tham khảo ti�
           const altInput = await findInput();
           if (altInput) {
             injectOk = await doInject(altInput, req.prompt);
-            const altEditorEl = altInput.classList?.contains('ql-editor') ? altInput : (altInput.querySelector?.('.ql-editor') || altInput);
+            const altEditorEl = altInput.hasAttribute('contenteditable') ? altInput : (altInput.querySelector?.('[contenteditable="true"]') || altInput);
             curVal = (altEditorEl.textContent || altEditorEl.value || altInput.textContent || altInput.value || '').trim();
             if (injectOk || curVal.length >= 4) input = altInput;
           }
@@ -5395,7 +5573,7 @@ LỊCH SỬ CÁC CÂU HỎI VỪA HOÀN THÀNH TRONG BÀI HỌC (tham khảo ti�
           return;
         }
 
-        await sleepB(400);
+        await sleepB(300);
 
         setBadge('🌉 Đang bấm gửi...', '#06b6d4');
         updateGeminiTabTitle('[🚀 Bấm gửi]');
@@ -5404,7 +5582,7 @@ LỊCH SỬ CÁC CÂU HỎI VỪA HOÀN THÀNH TRONG BÀI HỌC (tham khảo ti�
         if (!sendOk) {
           console.warn('[EduNext Bridge] clickSend chưa xác nhận thành công, tiếp tục theo dõi phản hồi...');
         }
-        await sleepB(1000);
+        await sleepB(800);
 
         setBadge('🌉 Đang chờ Gemini sinh đáp án...', '#818cf8');
         updateGeminiTabTitle('[🧠 Đang giải...]');
@@ -5438,15 +5616,42 @@ LỊCH SỬ CÁC CÂU HỎI VỪA HOÀN THÀNH TRONG BÀI HỌC (tham khảo ti�
       }
     }
 
-    GM_addValueChangeListener('EDUNEXT_AI_REQUEST', async (name, oldVal, newVal) => {
-      if (!newVal) return;
-      try {
-        const req = JSON.parse(newVal);
-        await handleIncomingRequest(req);
-      } catch (e) {
-        console.error('[EduNext Bridge] Lỗi listener:', e);
+    try {
+      if (typeof GM_addValueChangeListener === 'function') {
+        GM_addValueChangeListener('EDUNEXT_AI_REQUEST', async (name, oldVal, newVal) => {
+          if (!newVal) return;
+          try {
+            const req = JSON.parse(newVal);
+            await handleIncomingRequest(req);
+          } catch (e) {
+            console.error('[EduNext Bridge] Lỗi listener:', e);
+          }
+        });
+      }
+    } catch (_) {}
+
+    window.addEventListener('message', async (e) => {
+      if (e.data && e.data.type === 'EDUNEXT_AI_REQUEST') {
+        if (e.source && e.source !== window) window._edunextSender = e.source;
+        try {
+          await handleIncomingRequest(e.data.data);
+        } catch (err) {
+          console.error('[EduNext Bridge] Lỗi postMessage handler:', err);
+        }
       }
     });
+
+    if (bridgeDaemonBC) {
+      bridgeDaemonBC.onmessage = async (e) => {
+        if (e.data && e.data.type === 'EDUNEXT_AI_REQUEST') {
+          try {
+            await handleIncomingRequest(e.data.data);
+          } catch (err) {
+            console.error('[EduNext Bridge] Lỗi BroadcastChannel handler:', err);
+          }
+        }
+      };
+    }
 
     WorkerTimer.setInterval(async () => {
       try {
@@ -5461,7 +5666,7 @@ LỊCH SỬ CÁC CÂU HỎI VỪA HOÀN THÀNH TRONG BÀI HỌC (tham khảo ti�
           }
         }
       } catch (_) {}
-    }, 1200);
+    }, 500);
 
     try {
       const initRaw = GM_getValue('EDUNEXT_AI_REQUEST', null);
@@ -6820,14 +7025,17 @@ LỊCH SỬ CÁC CÂU HỎI VỪA HOÀN THÀNH TRONG BÀI HỌC (tham khảo ti�
 
     $('#bOpenGemini')?.addEventListener('click', () => {
       log('BRIDGE', '🚀 Mở tab gemini.google.com...');
-      window.open('https://gemini.google.com', '_blank');
+      STATE.bridgeWindow = window.open('https://gemini.google.com/', 'edunext_gemini_bridge_tab');
+      if (STATE.bridgeWindow && typeof STATE.bridgeWindow.focus === 'function') {
+        try { STATE.bridgeWindow.focus(); } catch (_) {}
+      }
       setTimeout(checkBridgeHeartbeat, 1500);
     });
 
     function checkBridgeHeartbeat() {
       try {
         const hb = GM_getValue('EDUNEXT_BRIDGE_HEARTBEAT', 0);
-        const alive = (Date.now() - hb) < 30000;
+        const alive = (Date.now() - hb) < 30000 || STATE.bridgeConnected;
         STATE.bridgeConnected = alive;
         const liveEl = $('#bridgeLiveSt');
         if (liveEl) {
