@@ -2297,6 +2297,17 @@
       return null;
     },
 
+    splitFeedbackAndQuestion(rawText) {
+      if (!rawText) return { feedback: '', question: '' };
+      const qMarker = rawText.match(/(?:Bạn\s*thử\s*[\w\s]*lại\s*nhé\s*:?\s*)?(?:Câu\s*hỏi\s*:?\s*)([A-ZÀ-ỸCho\b][\s\S]+)$/i);
+      if (qMarker && qMarker[1] && qMarker[1].length > 15) {
+        const feedbackPart = rawText.substring(0, qMarker.index).trim();
+        const questionPart = qMarker[1].trim();
+        return { feedback: feedbackPart, question: questionPart };
+      }
+      return { feedback: '', question: rawText };
+    },
+
     findOriginalQuestionInChat() {
       const msgs = this.getChatMessages();
       if (msgs.length === 0) return '';
@@ -2311,6 +2322,10 @@
       for (let i = searchEnd - 1; i >= 0; i--) {
         const m = msgs[i];
         if (m.role === 'assistant') {
+          const split = this.splitFeedbackAndQuestion(m.text);
+          if (split.question && split.question.length > 20 && !this.checkFeedbackBanner(null, split.question).hasFeedback) {
+            return split.question;
+          }
           const isFeedback = /chưa\s*đúng|chưa\s*chính\s*xác|sai\s*rồi|not\s*quite|incorrect|tuy\s*nhiên|nhưng\s*mới|chưa\s*đủ|chưa\s*hoàn\s*chỉnh|sửa\s*lại|thử\s*lại/i.test(m.text);
           if (!isFeedback && m.text.length > 15) {
             return this.extractCleanText(m.element, m.text);
@@ -2464,11 +2479,14 @@
           }
           const feedbackInfo = this.checkFeedbackBanner(turnLastEl, cleanTurnText);
           if (feedbackInfo.hasFeedback) {
+            const split = this.splitFeedbackAndQuestion(cleanTurnText);
             return {
-              type: 'feedback',
+              type: split.question && split.question.length > 20 ? 'question' : 'feedback',
+              source: 'chat_turn',
               feedback: feedbackInfo,
-              feedbackText: cleanTurnText,
-              text: cleanTurnText,
+              feedbackText: split.feedback || cleanTurnText,
+              questionText: split.question || '',
+              text: split.question && split.question.length > 20 ? split.question : cleanTurnText,
               element: turnLastEl,
               turnMsgs: turnMsgs
             };
@@ -3610,7 +3628,16 @@
      + BẮT BUỘC dùng 100% tiếng Việt chuẩn sách giáo khoa THPT: "giảm phân", "nhân tố di truyền" (hoặc "alen"), "nhiễm sắc thể", "gen", "giao tử", "hợp tử"...
      + Toàn bộ còn lại 100% là tiếng Việt thuần túy!`;
 
-      let sys = `Bạn là một học sinh THPT (lớp 10, 11, 12) học lực xuất sắc theo đúng chương trình chuẩn của Bộ Giáo dục và Đào tạo Việt Nam (SGK mới: Kết nối tri thức, Cánh diều, Chân trời sáng tạo).
+      let actualQuestion = (qd.questionText || qd.text || '').trim();
+      if (!actualQuestion || actualQuestion.length < 15 || domScraper.checkFeedbackBanner(null, actualQuestion).hasFeedback) {
+        const exQ = domScraper.findExerciseBlockQuestion();
+        const chatQ = domScraper.findOriginalQuestionInChat();
+        if (exQ && exQ.length > 15) actualQuestion = exQ;
+        else if (chatQ && chatQ.length > 15) actualQuestion = chatQ;
+      }
+      if (!actualQuestion) actualQuestion = (qd.text || '').trim();
+
+      let sys = `CÂU HỎI BÀI TẬP:\n${actualQuestion}\n\nBạn là một học sinh THPT (lớp 10, 11, 12) học lực xuất sắc theo đúng chương trình chuẩn của Bộ Giáo dục và Đào tạo Việt Nam (SGK mới: Kết nối tri thức, Cánh diều, Chân trời sáng tạo).
 Phong cách trả lời (/human): Tự nhiên, người thật, ngắn gọn, gãy gọn, thông minh, đúng chất học sinh giỏi. Tuyệt đối KHÔNG trả lời theo kiểu máy móc, hàn lâm, dài dòng hay giáo điều của AI.
 
 CÁC QUY TẮC SỐNG CÒN BẮT BUỘC TUÂN THỦ:
@@ -3803,7 +3830,7 @@ LỊCH SỬ CÁC CÂU HỎI VỪA HOÀN THÀNH TRONG BÀI HỌC (tham khảo ti�
         sys += `\n\n💡 PHẢN HỒI & GỢI Ý ĐẶC BIỆT TỪ GIÁO VIÊN / BOT (CHÌA KHÓA TRỰC TIẾP CỦA ĐÁP ÁN):\n${qd.botHint}\n👉 BẮT BUỘC: Hãy bám sát và dùng chính xác gợi ý trên để đưa ra câu trả lời đầy đủ, hoàn chỉnh!`;
       }
 
-      sys += `\n\nCÂU HỎI CẦN GIẢI:\n${qd.text}`;
+      sys += `\n\nNHẮC LẠI CÂU HỎI CẦN GIẢI:\n${actualQuestion}\n👉 BẮT BUỘC TRẢ LỜI NGAY ĐÁP ÁN CHO CÂU HỎI TRÊN:`;
       return sys + _0xCANARY;
     },
 
@@ -3828,20 +3855,19 @@ LỊCH SỬ CÁC CÂU HỎI VỪA HOÀN THÀNH TRONG BÀI HỌC (tham khảo ti�
           ? STATE.wrongAnswers
           : [(STATE.conversationHistory[STATE.conversationHistory.length - 1]?.answer || '').replace(/^Trả\s*lời\s*:\s*/i, '').trim()].filter(Boolean);
 
-        p += `🚨 [YÊU CẦU GIẢI LẠI - AI WEB ĐÃ BÁO CHƯA ĐÚNG]:\n\n`;
+        p += `CÂU HỎI BÀI TẬP CẦN GIẢI LẠI:\n${actualQuestion}\n\n`;
         if (botFeedback) {
-          p += `📢 THÔNG BÁO BÁO SAI & NHẬN XÉT CỤ THỂ TỪ AI WEB:\n"${botFeedback}"\n\n`;
+          p += `📢 THÔNG BÁO BÁO SAI & NHẬN XÉT CỦA BÊN AI WEB:\n"${botFeedback}"\n\n`;
         }
         if (botHint) {
           p += `💡 GỢI Ý ĐỊNH HƯỚNG TỪ AI WEB:\n"${botHint}"\n\n`;
         }
         if (wrongList.length > 0) {
-          p += `⛔ CÁC ĐÁP ÁN ĐÃ THỬ VÀ BỊ TỪ CHỐI (TUYỆT ĐỐI CẤM LẶP LẠI):\n${wrongList.join(', ')}\n\n`;
+          p += `⛔ CÁC ĐÁP ÁN ĐÃ THỬ VÀ BỊ TỪ CHỐI (CẤM LẶP LẠI): ${wrongList.join(', ')}\n\n`;
         }
-        p += `CÂU HỎI GỐC CỦA ĐỀ BÀI CẦN GIẢI:\n${actualQuestion}\n\n`;
-        p += `👉 BẮT BUỘC: Hãy đọc kỹ thông báo báo sai và gợi ý của bên AI Web ở trên, phân tích vì sao đáp án trước bị từ chối, và đưa ra câu trả lời mới hoàn toàn chính xác theo đúng hướng dẫn của AI Web.\nĐịnh dạng: Trả lời: <đáp án>`;
+        p += `👉 BẮT BUỘC: Dựa vào đề bài gốc và nhận xét/gợi ý của AI Web ở trên, phân tích vì sao đáp án trước bị từ chối, và đưa ra câu trả lời mới hoàn toàn chính xác theo đúng hướng dẫn của AI Web.\nĐịnh dạng: Trả lời: <đáp án>`;
       } else {
-        p += `Tiếp tục làm bài theo các quy tắc THPT chuẩn đã thiết lập (Phong cách /human thuần túy, tuyệt đối KHÔNG markdown, KHÔNG latex, KHÔNG ký tự $, định dạng "Trả lời: <đáp án>").\n\n`;
+        p += `CÂU HỎI BÀI TẬP:\n${actualQuestion}\n\n`;
         if (botHint) {
           p += `💡 Gợi ý câu hỏi: ${botHint}\n\n`;
         }
@@ -3849,7 +3875,7 @@ LỊCH SỬ CÁC CÂU HỎI VỪA HOÀN THÀNH TRONG BÀI HỌC (tham khảo ti�
           const cleanBtm = qd.bottomContext.replace(/data:image\/[a-zA-Z0-9+\-\.]+;base64,[A-Za-z0-9+/=]+/g, '').replace(/!\[.*?\]\([^\)]+\)/g, '');
           p += `Dữ kiện bổ sung: ${cleanBtm.substring(0, 3000)}\n\n`;
         }
-        p += `CÂU HỎI TIẾP THEO:\n${actualQuestion}`;
+        p += `👉 Tiếp tục làm bài theo các quy tắc THPT chuẩn đã thiết lập (Phong cách /human thuần túy, tuyệt đối KHÔNG markdown, KHÔNG latex, KHÔNG ký tự $, định dạng "Trả lời: <đáp án>").`;
       }
       return p + _0xCANARY;
     },
@@ -4367,11 +4393,6 @@ LỊCH SỬ CÁC CÂU HỎI VỪA HOÀN THÀNH TRONG BÀI HỌC (tham khảo ti�
       log('BRIDGE', `🌉 Gửi yêu cầu qua Cross-Tab Bridge (Lượt #${STATE.bridgeSessionPromptCount}, ID: ${reqId.substring(0, 8)}, ${img ? 'Có hình ảnh đính kèm' : 'Chỉ văn bản'})...`);
       log('BRIDGE', '   Đang đồng bộ dữ liệu tới tab gemini.google.com...');
 
-      try {
-        if (!STATE.bridgeWindow || STATE.bridgeWindow.closed) {
-          STATE.bridgeWindow = window.open('https://gemini.google.com/', 'edunext_gemini_bridge_tab');
-        }
-      } catch (_) {}
 
       const reqObj = {
         id: reqId,
@@ -5362,45 +5383,49 @@ LỊCH SỬ CÁC CÂU HỎI VỪA HOÀN THÀNH TRONG BÀI HỌC (tham khảo ti�
 
       await sleepB(80);
 
-      let pasteSucceeded = false;
+      const lines = cleanText.split('\n');
+      let injectSuccess = false;
+
       try {
-        const dt = new DataTransfer();
-        dt.setData('text/plain', cleanText);
-        dt.setData('text/html', `<p>${cleanText.replace(/\n/g, '<br>')}</p>`);
-        targetEditor.dispatchEvent(new ClipboardEvent('paste', {
-          clipboardData: dt, bubbles: true, cancelable: true, composed: true
-        }));
-        await sleepB(60);
-        const curContent = (targetEditor.textContent || targetEditor.value || '').trim();
-        if (curContent.length >= Math.min(4, cleanText.length)) pasteSucceeded = true;
+        targetEditor.focus();
+        const sel = (win.getSelection && win.getSelection()) || window.getSelection();
+        if (sel) {
+          sel.removeAllRanges();
+          const range = doc.createRange();
+          range.selectNodeContents(targetEditor);
+          sel.addRange(range);
+          try { doc.execCommand('selectAll', false, null); } catch (_) {}
+          try { doc.execCommand('delete', false, null); } catch (_) {}
+          for (let i = 0; i < lines.length; i++) {
+            if (lines[i].length > 0) {
+              doc.execCommand('insertText', false, lines[i]);
+            }
+            if (i < lines.length - 1) {
+              doc.execCommand('insertLineBreak');
+            }
+          }
+          await sleepB(60);
+          const curLen = (targetEditor.textContent || targetEditor.value || '').trim().length;
+          if (curLen >= Math.min(cleanText.length * 0.7, 40)) {
+            injectSuccess = true;
+          }
+        }
       } catch (_) {}
 
-      if (!pasteSucceeded || (targetEditor.textContent || '').trim().length < 4) {
+      if (!injectSuccess) {
         try {
-          targetEditor.focus();
-          const sel = (win.getSelection && win.getSelection()) || window.getSelection();
-          if (sel) {
-            sel.removeAllRanges();
-            const range = doc.createRange();
-            range.selectNodeContents(targetEditor);
-            sel.addRange(range);
-            try { doc.execCommand('selectAll', false, null); } catch (_) {}
-            try { doc.execCommand('delete', false, null); } catch (_) {}
-            doc.execCommand('insertText', false, cleanText);
-          }
-        } catch (_) {}
-      }
-
-      const currentLen = (targetEditor.textContent || targetEditor.value || '').trim().length;
-      if (currentLen < 4) {
-        try {
-          let p = targetEditor.querySelector('p');
-          if (!p) {
-            p = doc.createElement('p');
+          targetEditor.innerHTML = '';
+          for (const line of lines) {
+            const p = doc.createElement('p');
+            if (!line.trim()) {
+              p.appendChild(doc.createElement('br'));
+            } else {
+              p.textContent = line;
+            }
             targetEditor.appendChild(p);
           }
-          p.textContent = cleanText;
           if ('value' in targetEditor) targetEditor.value = cleanText;
+          injectSuccess = true;
         } catch (_) {}
       }
 
@@ -5411,7 +5436,7 @@ LỊCH SỬ CÁC CÂU HỎI VỪA HOÀN THÀNH TRONG BÀI HỌC (tham khảo ti�
         targetEditor.dispatchEvent(new Event('input', { bubbles: true, composed: true }));
         targetEditor.dispatchEvent(new Event('change', { bubbles: true, composed: true }));
 
-        const richParent = targetEditor.closest('rich-textarea') || targetEditor.parentElement;
+        const richParent = targetEditor.closest('rich-textarea') || targetEditor.parentElement || doc.querySelector('rich-textarea');
         if (richParent) {
           richParent.dispatchEvent(new InputEvent('input', { bubbles: true, composed: true }));
           richParent.dispatchEvent(new Event('input', { bubbles: true, composed: true }));
@@ -5424,7 +5449,7 @@ LỊCH SỬ CÁC CÂU HỎI VỪA HOÀN THÀNH TRONG BÀI HỌC (tham khảo ti�
 
       await sleepB(120);
       const finalContent = (targetEditor.textContent || targetEditor.value || '').trim();
-      return finalContent.length >= Math.min(4, cleanText.length);
+      return finalContent.length >= Math.min(10, cleanText.length);
     }
 
     async function clickSend(inputEl) {
