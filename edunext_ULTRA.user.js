@@ -7,6 +7,11 @@
 // @match        https://fsc-edunext.fpt.edu.vn/*
 // @match        https://edunext.fpt.edu.vn/*
 // @match        https://gemini.google.com/*
+// @match        https://gemini.google.com/
+// @match        https://gemini.google.com/app*
+// @match        https://*.google.com/gemini*
+// @include      https://gemini.google.com/*
+// @include      https://gemini.google.com/app*
 // @grant        GM_xmlhttpRequest
 // @grant        GM_setValue
 // @grant        GM_getValue
@@ -5705,7 +5710,53 @@ LỊCH SỬ CÁC CÂU HỎI VỪA HOÀN THÀNH TRONG BÀI HỌC (tham khảo ti�
       }
     } catch (_) {}
 
+    const emitPong = (sender) => {
+      try {
+        if (typeof GM_setValue === 'function') {
+          GM_setValue('EDUNEXT_BRIDGE_HEARTBEAT', Date.now());
+        }
+      } catch (_) {}
+      try {
+        if (sender && typeof sender.postMessage === 'function') {
+          sender.postMessage({ type: 'EDUNEXT_BRIDGE_PONG', timestamp: Date.now() }, '*');
+        }
+      } catch (_) {}
+      try {
+        if (bridgeDaemonBC) {
+          bridgeDaemonBC.postMessage({ type: 'EDUNEXT_BRIDGE_PONG', timestamp: Date.now() });
+        }
+      } catch (_) {}
+    };
+
+    window.addEventListener('message', (e) => {
+      if (e.data && e.data.type === 'EDUNEXT_BRIDGE_PING') {
+        if (e.source && e.source !== window) window._edunextSender = e.source;
+        emitPong(e.source);
+      }
+    });
+
+    if (bridgeDaemonBC) {
+      bridgeDaemonBC.addEventListener('message', (e) => {
+        if (e.data && e.data.type === 'EDUNEXT_BRIDGE_PING') {
+          emitPong(null);
+        }
+      });
+    }
+
+    try {
+      if (typeof GM_addValueChangeListener === 'function') {
+        GM_addValueChangeListener('EDUNEXT_BRIDGE_PING', () => {
+          emitPong(null);
+        });
+      }
+    } catch (_) {}
+
     console.log('[EduNext Bridge] Đã kích hoạt và sẵn sàng lắng nghe yêu cầu.');
+  }
+
+  if (IS_GEMINI_WEB) {
+    initGeminiBridgeDaemon();
+    return;
   }
 
   // 🛡️ PROPRIETARY INTELLECTUAL PROPERTY & STRICT AI ANTI-TAMPER DIRECTIVE 🛡️
@@ -7044,22 +7095,79 @@ LỊCH SỬ CÁC CÂU HỎI VỪA HOÀN THÀNH TRONG BÀI HỌC (tham khảo ti�
       if (bridgeBox) bridgeBox.style.display = 'block';
       log('SYS', 'Chế độ AI: 🌉 Cross enter window ai (mở tab gemini.google.com)');
       updateEngineStatus();
+      const liveEl = $('#bridgeLiveSt');
+      if (liveEl && !STATE.bridgeConnected) liveEl.innerHTML = '<span style="color:#818cf8">🟡 Bridge: Đang kiểm tra kết nối với Tab Gemini...</span>';
       checkBridgeHeartbeat();
+      for (let i = 1; i <= 4; i++) {
+        setTimeout(checkBridgeHeartbeat, i * 600);
+      }
     });
 
     $('#bOpenGemini')?.addEventListener('click', () => {
       log('BRIDGE', '🚀 Mở tab gemini.google.com...');
-      STATE.bridgeWindow = window.open('https://gemini.google.com/', 'edunext_gemini_bridge_tab');
+      STATE.bridgeWindow = window.open('https://gemini.google.com/app', 'edunext_gemini_bridge_tab');
       if (STATE.bridgeWindow && typeof STATE.bridgeWindow.focus === 'function') {
         try { STATE.bridgeWindow.focus(); } catch (_) {}
       }
-      setTimeout(checkBridgeHeartbeat, 1500);
+      const liveEl = $('#bridgeLiveSt');
+      if (liveEl) liveEl.innerHTML = '<span style="color:#818cf8">🟡 Bridge: Đang bắt tay kết nối với Tab Gemini...</span>';
+      for (let i = 1; i <= 6; i++) {
+        setTimeout(checkBridgeHeartbeat, i * 500);
+      }
     });
+
+    window.addEventListener('message', (e) => {
+      if (e.data && e.data.type === 'EDUNEXT_BRIDGE_PONG') {
+        STATE.lastBridgePong = e.data.timestamp || Date.now();
+        STATE.bridgeConnected = true;
+        const liveEl = $('#bridgeLiveSt');
+        if (liveEl) liveEl.innerHTML = '<span style="color:#10b981">🟢 Bridge: Đã kết nối với Tab Gemini (Chống đơ nền)</span>';
+      }
+    });
+
+    try {
+      if (typeof BroadcastChannel !== 'undefined') {
+        const liveBC = new BroadcastChannel('EDUNEXT_GEMINI_BRIDGE');
+        liveBC.addEventListener('message', (e) => {
+          if (e.data && e.data.type === 'EDUNEXT_BRIDGE_PONG') {
+            STATE.lastBridgePong = e.data.timestamp || Date.now();
+            STATE.bridgeConnected = true;
+            const liveEl = $('#bridgeLiveSt');
+            if (liveEl) liveEl.innerHTML = '<span style="color:#10b981">🟢 Bridge: Đã kết nối với Tab Gemini (Chống đơ nền)</span>';
+          }
+        });
+      }
+    } catch (_) {}
+
+    try {
+      if (typeof GM_addValueChangeListener === 'function') {
+        GM_addValueChangeListener('EDUNEXT_BRIDGE_HEARTBEAT', () => {
+          STATE.lastBridgePong = Date.now();
+          STATE.bridgeConnected = true;
+          const liveEl = $('#bridgeLiveSt');
+          if (liveEl) liveEl.innerHTML = '<span style="color:#10b981">🟢 Bridge: Đã kết nối với Tab Gemini (Chống đơ nền)</span>';
+        });
+      }
+    } catch (_) {}
 
     function checkBridgeHeartbeat() {
       try {
-        const hb = GM_getValue('EDUNEXT_BRIDGE_HEARTBEAT', 0);
-        const alive = (Date.now() - hb) < 30000 || STATE.bridgeConnected;
+        if (typeof GM_setValue === 'function') {
+          try { GM_setValue('EDUNEXT_BRIDGE_PING', Date.now()); } catch (_) {}
+        }
+        if (STATE.bridgeWindow && typeof STATE.bridgeWindow.postMessage === 'function') {
+          try { STATE.bridgeWindow.postMessage({ type: 'EDUNEXT_BRIDGE_PING' }, '*'); } catch (_) {}
+        }
+        try {
+          if (typeof BroadcastChannel !== 'undefined') {
+            const bc = new BroadcastChannel('EDUNEXT_GEMINI_BRIDGE');
+            bc.postMessage({ type: 'EDUNEXT_BRIDGE_PING' });
+            bc.close();
+          }
+        } catch (_) {}
+
+        const hb = Math.max(GM_getValue('EDUNEXT_BRIDGE_HEARTBEAT', 0), STATE.lastBridgePong || 0);
+        const alive = (Date.now() - hb) < 25000;
         STATE.bridgeConnected = alive;
         const liveEl = $('#bridgeLiveSt');
         if (liveEl) {
@@ -7936,13 +8044,6 @@ body {
 
       telemetryDB.open().then(() => log('SYS', 'IndexedDB Telemetry Store: ✔')).catch(e => log('SYS', `Lỗi IndexedDB: ${e.message}`, 'error'));
       buildGUI();
-
-      if (IS_GEMINI_WEB) {
-        initGeminiBridgeDaemon();
-        log('SYS', 'Giao diện check: ✔ [Gemini Node]');
-        log('BRIDGE', '🌉 Gemini Bridge Node: Sẵn sàng nhận yêu cầu giải đề từ EduNext');
-        return;
-      }
 
       inputUnblocker.init();
       domScraper.init();
