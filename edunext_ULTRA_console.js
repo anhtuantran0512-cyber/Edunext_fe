@@ -2270,11 +2270,26 @@
 
     splitFeedbackAndQuestion(rawText) {
       if (!rawText) return { feedback: '', question: '' };
-      const qMarker = rawText.match(/(?:Bạn\s*thử\s*[\w\s]*lại\s*nhé\s*:?\s*)?(?:Câu\s*hỏi\s*:?\s*)([A-ZÀ-ỸCho\b][\s\S]+)$/i);
-      if (qMarker && qMarker[1] && qMarker[1].length > 15) {
-        const feedbackPart = rawText.substring(0, qMarker.index).trim();
-        const questionPart = qMarker[1].trim();
-        return { feedback: feedbackPart, question: questionPart };
+      const qMarkerRegex = /(?:(?:Bạn\s*(?:hãy|thử|vui\s*lòng)?\s*(?:làm\s*bài|sửa\s*lại|tính\s*toán\s*lại|suy\s*nghĩ\s*lại|trả\s*lời|hoàn\s*thành)[^:\n]*:?\s*)*(?:Câu\s*hỏi\s*(?:\d+)?[\s:\n\-]+|Question\s*(?:\d+)?[\s:\n\-]+|Bài\s*(?:tập|toán)\s*(?:\d+)?[\s:\n\-]+)|(?:Bạn\s*(?:hãy|thử|vui\s*lòng)\s*(?:làm\s*bài|sửa\s*lại|tính\s*toán\s*lại|suy\s*nghĩ\s*lại|hoàn\s*thành)[^:\n]*:?\s*))/i;
+      const match = rawText.match(qMarkerRegex);
+      if (match && typeof match.index === 'number') {
+        const feedbackPart = rawText.substring(0, match.index).trim();
+        let questionPart = rawText.substring(match.index + match[0].length).trim();
+        const fmtIdx = questionPart.search(/(?:Hãy\s*trả\s*lời\s*theo\s*định\s*dạng|Format\s*trả\s*lời|Định\s*dạng\s*trả\s*lời)[\s\S]*$/i);
+        if (fmtIdx > 15) {
+          questionPart = questionPart.substring(0, fmtIdx).trim();
+        }
+        if (questionPart.length > 10) {
+          return { feedback: feedbackPart, question: questionPart };
+        }
+      }
+      const mathStarter = rawText.match(/(?:^|\n\n|\.\s+)(Cho\s+|Tính\s+|Tìm\s+|Xác\s*định\s+|Trong\s+không\s*gian\s+|Trong\s+mặt\s*phẳng\s+|Giải\s+phương\s*trình\s+)([\s\S]+)$/i);
+      if (mathStarter && typeof mathStarter.index === 'number' && mathStarter.index > 10) {
+        const feedbackPart = rawText.substring(0, mathStarter.index).trim();
+        let questionPart = rawText.substring(mathStarter.index).replace(/^[\.\s]+/, '').trim();
+        const fmtIdx = questionPart.search(/(?:Hãy\s*trả\s*lời\s*theo\s*định\s*dạng|Format\s*trả\s*lời|Định\s*dạng\s*trả\s*lời)[\s\S]*$/i);
+        if (fmtIdx > 15) questionPart = questionPart.substring(0, fmtIdx).trim();
+        if (questionPart.length > 10) return { feedback: feedbackPart, question: questionPart };
       }
       return { feedback: '', question: rawText };
     },
@@ -2452,22 +2467,25 @@
           if (feedbackInfo.hasFeedback) {
             const split = this.splitFeedbackAndQuestion(cleanTurnText);
             return {
-              type: split.question && split.question.length > 20 ? 'question' : 'feedback',
+              type: split.question && split.question.length > 15 ? 'question' : 'feedback',
               source: 'chat_turn',
               feedback: feedbackInfo,
               feedbackText: split.feedback || cleanTurnText,
               questionText: split.question || '',
-              text: split.question && split.question.length > 20 ? split.question : cleanTurnText,
+              text: split.question && split.question.length > 15 ? split.question : cleanTurnText,
               element: turnLastEl,
               turnMsgs: turnMsgs
             };
           }
           const isQ = this.isQuestion(turnLastEl, cleanTurnText) || turnMsgs.some(m => this.isQuestion(m.element, m.text));
           if (isQ) {
+            const split = this.splitFeedbackAndQuestion(cleanTurnText);
+            const finalQText = (split.question && split.question.length > 15) ? split.question : cleanTurnText;
             return {
               type: 'question',
               source: 'chat_turn',
-              text: cleanTurnText,
+              text: finalQText,
+              questionText: finalQText,
               element: turnLastEl,
               turnMsgs: turnMsgs,
               feedback: feedbackInfo
@@ -2890,39 +2908,54 @@
     extractCleanText(botElement, fallbackRaw) {
       let text = '';
       try {
-        const clone = botElement.cloneNode(true);
-        reconstructLatexFormulas(clone);
-        const mathml = clone.querySelectorAll('.katex-mathml, annotation');
-        for (const m of mathml) m.remove();
-        const styles = clone.querySelectorAll('style, script, svg, noscript');
-        for (const s of styles) s.remove();
-
-        const isChatMessage = botElement.classList && (
-          botElement.classList.contains('chat-message') ||
-          botElement.classList.contains('message-container') ||
-          botElement.classList.contains('ant-comment') ||
-          !!botElement.closest(CONFIG.SELECTORS.CHAT_BODY || '.chat-body')
-        );
-
-        let qBlock = clone;
-        if (!isChatMessage) {
-          const innerBlock = clone.querySelector(CONFIG.SELECTORS.EXERCISE_BLOCK);
-          if (innerBlock) qBlock = innerBlock;
-        }
-
-        const imgs = qBlock.querySelectorAll('img');
-        const altHints = [];
-        for (const im of imgs) {
-          const alt = im.getAttribute('alt');
-          if (alt && alt.trim() && !/avatar|icon|logo/i.test(alt) && !alt.startsWith('data:') && alt.length < 200) {
-            altHints.push(`[Mô tả hình ảnh: ${alt.trim()}]`);
+        if (botElement) {
+          const nativeText = (botElement.innerText || '').trim();
+          if (nativeText && nativeText.length >= 10 && !/^\s*(\[|\{)/.test(nativeText)) {
+            text = sanitizeText(nativeText);
           }
         }
-        text = sanitizeText(qBlock.textContent || '');
-        if (altHints.length > 0) {
-          text = altHints.join(' ') + '\n' + text;
+        if (!text || text.length < 10) {
+          const clone = botElement.cloneNode(true);
+          reconstructLatexFormulas(clone);
+          const mathml = clone.querySelectorAll('.katex-mathml, annotation');
+          for (const m of mathml) m.remove();
+          const styles = clone.querySelectorAll('style, script, svg, noscript');
+          for (const s of styles) s.remove();
+
+          const isChatMessage = botElement.classList && (
+            botElement.classList.contains('chat-message') ||
+            botElement.classList.contains('message-container') ||
+            botElement.classList.contains('ant-comment') ||
+            botElement.classList.contains('msg-row') ||
+            botElement.classList.contains('message-assistant') ||
+            !!botElement.closest(CONFIG.SELECTORS.CHAT_BODY || '.chat-body') ||
+            !!botElement.closest(CONFIG.SELECTORS.CHAT_MESSAGES || '.chat-messages')
+          );
+
+          let qBlock = clone;
+          if (!isChatMessage) {
+            const innerBlock = clone.querySelector(CONFIG.SELECTORS.EXERCISE_BLOCK);
+            if (innerBlock) qBlock = innerBlock;
+          }
+
+          const imgs = qBlock.querySelectorAll('img');
+          const altHints = [];
+          for (const im of imgs) {
+            const alt = im.getAttribute('alt');
+            if (alt && alt.trim() && !/avatar|icon|logo/i.test(alt) && !alt.startsWith('data:') && alt.length < 200) {
+              altHints.push(`[Mô tả hình ảnh: ${alt.trim()}]`);
+            }
+          }
+          text = sanitizeText(qBlock.textContent || '');
+          if (altHints.length > 0) {
+            text = altHints.join(' ') + '\n' + text;
+          }
         }
       } catch (_) {
+        text = fallbackRaw || '';
+      }
+
+      if (!text || text.length < 5) {
         text = fallbackRaw || '';
       }
 
@@ -3042,6 +3075,10 @@
       const texts = turnMsgs.map(m => this.extractCleanText(m.element, m.text));
       let combinedText = texts.join('\n\n');
 
+      if (candidate.questionText && candidate.questionText.length > 15) {
+        combinedText = candidate.questionText;
+      }
+
       if (turnLastEl) {
         const optionEls = turnLastEl.querySelectorAll('.ant-radio-wrapper, .ant-checkbox-wrapper, [class*="option-item"], [class*="choice-item"], [class*="answer-option"], [role="radio"], [role="checkbox"], .quiz-option, .choice-btn');
         if (optionEls.length > 0) {
@@ -3069,14 +3106,19 @@
       }
 
       if (candidate.type === 'feedback' || this.checkFeedbackBanner(turnLastEl, combinedText).hasFeedback) {
-        const exQ = this.findExerciseBlockQuestion();
-        const chatQ = this.findOriginalQuestionInChat();
-        if (exQ && exQ.length > 15) {
-          combinedText = exQ;
-        } else if (chatQ && chatQ.length > 15) {
-          combinedText = chatQ;
-        } else if (STATE.currentQuestion && STATE.currentQuestion.text && STATE.currentQuestion.text.length > 15 && !this.checkFeedbackBanner(null, STATE.currentQuestion.text).hasFeedback) {
-          combinedText = STATE.currentQuestion.text;
+        const split = this.splitFeedbackAndQuestion(combinedText);
+        if (split.question && split.question.length > 15 && !this.checkFeedbackBanner(null, split.question).hasFeedback) {
+          combinedText = split.question;
+        } else {
+          const exQ = this.findExerciseBlockQuestion();
+          const chatQ = this.findOriginalQuestionInChat();
+          if (exQ && exQ.length > 15) {
+            combinedText = exQ;
+          } else if (chatQ && chatQ.length > 15) {
+            combinedText = chatQ;
+          } else if (STATE.currentQuestion && STATE.currentQuestion.text && STATE.currentQuestion.text.length > 15 && !this.checkFeedbackBanner(null, STATE.currentQuestion.text).hasFeedback) {
+            combinedText = STATE.currentQuestion.text;
+          }
         }
       }
 
@@ -3105,10 +3147,15 @@
       if (allImages.length > 0) {
         log('VISION', `🖼 Thu thập được ${allImages.length} hình ảnh câu hỏi`);
         if (!combinedText || combinedText.trim().length < 10 || this.checkFeedbackBanner(turnLastEl, combinedText).hasFeedback) {
-          const exQ = this.findExerciseBlockQuestion();
-          const chatQ = this.findOriginalQuestionInChat();
-          if (exQ && exQ.length > 10) combinedText = exQ;
-          else if (chatQ && chatQ.length > 10) combinedText = chatQ;
+          const split = this.splitFeedbackAndQuestion(combinedText);
+          if (split.question && split.question.length > 10 && !this.checkFeedbackBanner(null, split.question).hasFeedback) {
+            combinedText = split.question;
+          } else {
+            const exQ = this.findExerciseBlockQuestion();
+            const chatQ = this.findOriginalQuestionInChat();
+            if (exQ && exQ.length > 10) combinedText = exQ;
+            else if (chatQ && chatQ.length > 10) combinedText = chatQ;
+          }
         }
         if (!combinedText || combinedText.trim().length < 5) {
           combinedText = 'Đề bài nằm trọn vẹn trong hình ảnh đính kèm ở trên. Hãy quan sát thật kỹ toàn bộ đề bài, dữ liệu, đồ thị/hình vẽ, phương trình và các phương án lựa chọn trong ảnh để phân tích và đưa ra đáp án chính xác nhất.';
@@ -3612,10 +3659,15 @@
 
       let actualQuestion = (qd.questionText || qd.text || '').trim();
       if (!actualQuestion || actualQuestion.length < 10 || domScraper.checkFeedbackBanner(null, actualQuestion).hasFeedback) {
-        const exQ = domScraper.findExerciseBlockQuestion();
-        const chatQ = domScraper.findOriginalQuestionInChat();
-        if (exQ && exQ.length > 10) actualQuestion = exQ;
-        else if (chatQ && chatQ.length > 10) actualQuestion = chatQ;
+        const split = domScraper.splitFeedbackAndQuestion(actualQuestion);
+        if (split.question && split.question.length > 10 && !domScraper.checkFeedbackBanner(null, split.question).hasFeedback) {
+          actualQuestion = split.question;
+        } else {
+          const exQ = domScraper.findExerciseBlockQuestion();
+          const chatQ = domScraper.findOriginalQuestionInChat();
+          if (exQ && exQ.length > 10) actualQuestion = exQ;
+          else if (chatQ && chatQ.length > 10) actualQuestion = chatQ;
+        }
       }
       if (!actualQuestion || actualQuestion.length < 5) {
         if (qd.images && qd.images.length > 0) {
@@ -3851,7 +3903,7 @@ LỊCH SỬ CÁC CÂU HỎI VỪA HOÀN THÀNH TRONG BÀI HỌC (tham khảo ti�
           ? STATE.wrongAnswers
           : [(STATE.conversationHistory[STATE.conversationHistory.length - 1]?.answer || '').replace(/^Trả\s*lời\s*:\s*/i, '').trim()].filter(Boolean);
 
-        p += `CÂU HỎI BÀI TẬP CẦN GIẢI LẠI:\n${actualQuestion}\n\n`;
+        p += `CÂU HỎI BÀI TẬP CẦN GIẢI LẠI: ${actualQuestion}\n\n`;
         if (botFeedback) {
           p += `📢 THÔNG BÁO BÁO SAI & NHẬN XÉT CỦA BÊN AI WEB:\n"${botFeedback}"\n\n`;
         }
@@ -3863,7 +3915,7 @@ LỊCH SỬ CÁC CÂU HỎI VỪA HOÀN THÀNH TRONG BÀI HỌC (tham khảo ti�
         }
         p += `👉 BẮT BUỘC: Dựa vào đề bài gốc và nhận xét/gợi ý của AI Web ở trên, phân tích vì sao đáp án trước bị từ chối, và đưa ra câu trả lời mới hoàn toàn chính xác theo đúng hướng dẫn của AI Web.\nĐịnh dạng: Trả lời: <đáp án>`;
       } else {
-        p += `CÂU HỎI BÀI TẬP:\n${actualQuestion}\n\n`;
+        p += `CÂU HỎI BÀI TẬP: ${actualQuestion}\n\n`;
         if (botHint) {
           p += `💡 Gợi ý câu hỏi: ${botHint}\n\n`;
         }
@@ -5423,17 +5475,32 @@ XÁC NHẬN: Bạn đã hiểu rõ toàn bộ vai trò và quy tắc THPT trên 
           sel.addRange(range);
           try { doc.execCommand('selectAll', false, null); } catch (_) {}
           try { doc.execCommand('delete', false, null); } catch (_) {}
-          for (let i = 0; i < lines.length; i++) {
-            if (lines[i].length > 0) {
-              doc.execCommand('insertText', false, lines[i]);
+
+          try {
+            const dt = new DataTransfer();
+            dt.setData('text/plain', cleanText);
+            const pasteEvt = new ClipboardEvent('paste', {
+              clipboardData: dt, bubbles: true, cancelable: true, composed: true
+            });
+            targetEditor.dispatchEvent(pasteEvt);
+            await sleepB(40);
+          } catch (_) {}
+
+          let curLen = (targetEditor.textContent || targetEditor.value || '').trim().length;
+          if (curLen < Math.min(cleanText.length * 0.7, 30)) {
+            for (let i = 0; i < lines.length; i++) {
+              if (lines[i].length > 0) {
+                doc.execCommand('insertText', false, lines[i]);
+              }
+              if (i < lines.length - 1) {
+                doc.execCommand('insertLineBreak');
+              }
             }
-            if (i < lines.length - 1) {
-              doc.execCommand('insertLineBreak');
-            }
+            await sleepB(50);
           }
-          await sleepB(60);
-          const curLen = (targetEditor.textContent || targetEditor.value || '').trim().length;
-          if (curLen >= Math.min(cleanText.length * 0.7, 40)) {
+
+          curLen = (targetEditor.textContent || targetEditor.value || '').trim().length;
+          if (curLen >= Math.min(cleanText.length * 0.7, 30)) {
             injectSuccess = true;
           }
         }
@@ -6179,6 +6246,7 @@ XÁC NHẬN: Bạn đã hiểu rõ toàn bộ vai trò và quy tắc THPT trên 
     escapeXml(str) {
       if (!str) return '';
       return String(str)
+        .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '')
         .replace(/&/g, '&amp;')
         .replace(/</g, '&lt;')
         .replace(/>/g, '&gt;')
@@ -6299,42 +6367,42 @@ XÁC NHẬN: Bạn đã hiểu rõ toàn bộ vai trò và quy tắc THPT trên 
 
     downloadBlob(blob, filename) {
       try {
-        if (typeof GM_download === 'function') {
-          try {
-            const url = URL.createObjectURL(blob);
-            GM_download({
-              url: url,
-              name: filename,
-              saveAs: false,
-              onload: () => {
-                setTimeout(() => { try { URL.revokeObjectURL(url); } catch (_) {} }, 10000);
-              },
-              onerror: () => {
-                this.fallbackDownload(blob, filename);
-              }
-            });
-            return;
-          } catch (_) {}
-        }
-      } catch (_) {}
-      this.fallbackDownload(blob, filename);
-    },
-
-    fallbackDownload(blob, filename) {
-      try {
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.style.cssText = 'position:fixed;top:-9999px;left:-9999px;opacity:0;pointer-events:none;';
         a.href = url;
         a.download = filename;
         (document.body || document.documentElement).appendChild(a);
-        a.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
+        a.click();
         setTimeout(() => {
           try {
             if (a.parentNode) a.parentNode.removeChild(a);
             URL.revokeObjectURL(url);
           } catch (_) {}
-        }, 10000);
+        }, 15000);
+      } catch (e) {
+        this.fallbackDownload(blob, filename);
+      }
+    },
+
+    fallbackDownload(blob, filename) {
+      try {
+        const reader = new FileReader();
+        reader.onload = () => {
+          try {
+            const dataUrl = reader.result;
+            const a = document.createElement('a');
+            a.style.cssText = 'position:fixed;top:-9999px;left:-9999px;opacity:0;pointer-events:none;';
+            a.href = dataUrl;
+            a.download = filename;
+            (document.body || document.documentElement).appendChild(a);
+            a.click();
+            setTimeout(() => {
+              try { if (a.parentNode) a.parentNode.removeChild(a); } catch (_) {}
+            }, 15000);
+          } catch (_) {}
+        };
+        reader.readAsDataURL(blob);
       } catch (e) {
         console.error('[Notebook] Lỗi tải file:', e);
       }
