@@ -2612,6 +2612,7 @@
       }
       q = q.replace(/^(?:Câu\s*hỏi|Question|Bài\s*tập|Task)[\s:]+/i, '');
       q = q.replace(/^(?:Câu\s*hỏi|Question|Bài\s*tập)([A-ZÀ-Ỹa-zà-ỹ])/i, '$1');
+      q = q.replace(/^[\s\]\)\.\:\-]+/, '');
       return (imgPrefix + q).trim();
     },
 
@@ -3470,6 +3471,7 @@ ${langRules}
         * Tiệm cận đứng: Đường thẳng x = x0 nếu giới hạn một bên tiến ra vô cực. Với hàm phân thức tối giản y = P(x)/Q(x), nghiệm mẫu Q(x) = 0 là các đường tiệm cận đứng.
         * Tiệm cận ngang: Đường thẳng y = y0 khi x tiến ra +vô cùng hoặc -vô cùng. Với y = (ax+b)/(cx+d), tiệm cận ngang là y = a/c, tiệm cận đứng là x = -d/c. Với y = sqrt(x^2+1)/x, có 2 tiệm cận ngang y = 1 (khi x -> +vô cùng) và y = -1 (khi x -> -vô cùng).
         * Khoảng cách từ điểm M(x, f(x)) tới tiệm cận đứng x = x0 là MH = |x - x0|; tới tiệm cận ngang y = y0 là MH = |f(x) - y0|. Khi x tiến tới tiệm cận, MH tiến về 0.
+        * Đối với câu hỏi tìm tiệm cận đứng / ngang / xiên hoặc hệ số: Trả lời ngắn gọn, trực diện giá trị (ví dụ: 'x = 1 và x = -2' hoặc 'y = x' hoặc 'a = 1, b = -2'). Tránh viết đoạn văn dài dòng nếu đề bài chỉ yêu cầu giá trị hoặc phương trình.
       + Tọa độ Oxyz, Hình học không gian, Nguyên hàm, Tích phân, Tổ hợp, Xác suất THPT.
       + TUYỆT ĐỐI KHÔNG xuất phương án phỏng đoán "hoặc có thể là...", "hoặc tương tự...". BẮT BUỘC chỉ đưa ra DUY NHẤT 1 kết quả chuẩn xác nhất! Viết phân số (a/b), căn bậc hai sqrt().
     - MÔN TIN HỌC (INFORMATICS):
@@ -3514,6 +3516,9 @@ ${langRules}
           for (const w of wrongList) {
             sys += `\n   ❌ "${w}" (ĐÃ SAI HOÀN TOÀN - CẤM ĐƯA RA LẠI!)`;
           }
+        }
+        if (STATE.lastBotFeedbackText) {
+          sys += `\n\n🎯 NỘI DUNG GỢI Ý & PHẢN HỒI CỦA GIÁO VIÊN / BOT (BẮT BUỘC TIẾP THU VÀ LÀM THEO):\n"${STATE.lastBotFeedbackText}"\n👉 Hãy đọc kỹ phân tích của giáo viên ở trên. Xác định chính xác phần bạn đã làm đúng để giữ lại, và phần còn thiếu để giải quyết dứt điểm theo đúng hướng dẫn!`;
         }
         sys += `\n👉 BẮT BUỘC: Bạn phải đưa ra một đáp án HOÀN TOÀN MỚI, KHÁC BIỆT với các đáp án sai ở trên.
 👉 TUYỆT ĐỐI CẤM SPAM HOẶC LẶP LẠI: Nếu lặp lại đáp án cũ hoặc câu trả lời có nội dung tương tự câu đã sai, bạn sẽ bị 0 điểm!
@@ -4505,9 +4510,9 @@ LỊCH SỬ CÁC CÂU HỎI VỪA HOÀN THÀNH TRONG BÀI HỌC (tham khảo ti�
       const qdText = qd ? qd.text : '';
       const isPureNumerical = /^[-+]?\d+(?:\.\d+)?(?:\s*[a-zA-Z%]+)?$/.test(cleanA.trim());
       const isForbiddenNumber = (qd && (qd.questionType === 'ERROR_ANALYSIS' || qd.forbidNumerical)) || STATE.forbidNumericalAnswers;
-      const isBrokenArtifact = !cleanA || cleanA.length < 4 || /^[^\wà-ỹ0-9]+$/i.test(cleanA.trim()) || /^[\$\.\,\;\:\-\*]+$/.test(cleanA.trim());
+      const isBrokenArtifact = !cleanA || /^[^\wà-ỹ0-9]+$/i.test(cleanA.trim()) || /^[\$\.\,\;\:\-\*]+$/.test(cleanA.trim());
 
-      const isTempFormulaQuestion = /V\s*=\s*V_?0|alpha\s*=\s*1\s*\/\s*273|thay\s*thẳng\s*t\s*=|300\s*K|Kelvin.*?Celsius|Celsius.*?Kelvin/i.test(qdText);
+      const isTempFormulaQuestion = !/tiệm\s*cận|hàm\s*số|đạo\s*hàm|tích\s*phân|hình\s*học|toán/i.test(qdText) && /(?:V\s*=\s*V_?0|alpha\s*=\s*1\s*\/\s*273|thay\s*thẳng\s*t\s*=|300\s*K.*?Celsius|Celsius.*?Kelvin)/i.test(qdText);
       if (isTempFormulaQuestion) {
         const lacksTempConcepts = !/celsius|độ\s*C/i.test(cleanA) || !/kelvin/i.test(cleanA) || isPureNumerical || isBrokenArtifact;
         if (lacksTempConcepts) {
@@ -4516,9 +4521,9 @@ LỊCH SỬ CÁC CÂU HỎI VỪA HOÀN THÀNH TRONG BÀI HỌC (tham khảo ti�
         }
       }
 
-      const isSignConventionQuestion = /khí|pít-tông|nhiệt\s*lượng|công|quy\s*ước\s*dấu|ΔU\s*=\s*A\s*\+\s*Q/i.test(qdText);
+      const isSignConventionQuestion = !/tiệm\s*cận|hàm\s*số|đạo\s*hàm|tích\s*phân|hình\s*học|toán/i.test(qdText) && /\b(?:khối\s*khí|pít-tông|nhiệt\s*lượng|quy\s*ước\s*dấu|ΔU\s*=\s*A\s*\+\s*Q|Delta\s*U)\b/i.test(qdText);
       if (isSignConventionQuestion && !isTempFormulaQuestion) {
-        if (isPureNumerical || isBrokenArtifact || (isForbiddenNumber && !/A\s*<\s*0|Q\s*<\s*0/i.test(cleanA))) {
+        if ((isPureNumerical && isForbiddenNumber) || (isForbiddenNumber && !/A\s*<\s*0|Q\s*<\s*0/i.test(cleanA))) {
           log('INJECT', '⚡ Smart Guard: Tự động chuẩn hóa đáp án về quy ước dấu (A < 0, Q < 0) theo chuẩn SGK...', 'warn');
           cleanA = 'Khối khí thực hiện công (đẩy pít-tông) nên A < 0, khối khí truyền nhiệt ra môi trường nên Q < 0. Do đó lập luận cả A và Q đều mang giá trị dương là sai quy ước dấu.';
         }
@@ -4612,6 +4617,7 @@ LỊCH SỬ CÁC CÂU HỎI VỪA HOÀN THÀNH TRONG BÀI HỌC (tham khảo ti�
         STATE.questionsCorrect++;
         STATE.retryCount = 0;
         STATE.wrongAnswers = [];
+        STATE.lastBotFeedbackText = '';
         updateStats();
 
         if (STATE.currentQuestion && STATE.currentAnswer) {
@@ -4622,6 +4628,7 @@ LỊCH SỬ CÁC CÂU HỎI VỪA HOÀN THÀNH TRONG BÀI HỌC (tham khảo ti�
       } else {
         STATE.questionsSolved++;
         STATE.retryCount++;
+        STATE.lastBotFeedbackText = (feedbackText || '').trim();
         log('VERIFY', `❌ CHƯA CHÍNH XÁC (Lần thử ${STATE.retryCount}/${CONFIG.MAX_RETRIES})`);
 
         if (STATE.currentQuestionTurnElement) {
@@ -6763,7 +6770,20 @@ LỊCH SỬ CÁC CÂU HỎI VỪA HOÀN THÀNH TRONG BÀI HỌC (tham khảo ti�
 
     $('#bDL')?.addEventListener('click', async () => {
       try {
-        log('SYS', 'Đang tổng hợp dữ liệu xuất file...');
+        log('SYS', 'Đang kết xuất trọn bộ Đề cương ôn tập Word (.docx), Markdown (.md) & Log kiểm định (.json)...');
+        try {
+          if (typeof notebookManager !== 'undefined') {
+            if (typeof notebookManager.captureCurrentPageData === 'function') {
+              notebookManager.captureCurrentPageData();
+            }
+            if (typeof notebookManager.exportAndDownload === 'function') {
+              notebookManager.exportAndDownload();
+            }
+          }
+        } catch (nbErr) {
+          console.error('[Export] Lỗi xuất đề cương:', nbErr);
+        }
+
         const d = await telemetryDB.exportSession();
         d.author = "BroAmStuck";
         d.author_profile = CONFIG.FACEBOOK_URL;
@@ -6773,7 +6793,7 @@ LỊCH SỬ CÁC CÂU HỎI VỪA HOÀN THÀNH TRONG BÀI HỌC (tham khảo ti�
         const u = URL.createObjectURL(b);
         const a = document.createElement('a'); a.href = u; a.download = `edunext_audit_${Date.now()}.json`;
         document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(u);
-        log('SYS', `✅ Xuất file thành công: edunext_audit_${Date.now()}.json (${(j.length / 1024).toFixed(1)} KB)`);
+        log('SYS', `✅ Xuất file thành công: Đề cương Word (.docx) & Log kiểm định (${(j.length / 1024).toFixed(1)} KB)`);
       } catch (e) { log('SYS', `Xuất file thất bại: ${e.message}`, 'error'); }
     });
 
