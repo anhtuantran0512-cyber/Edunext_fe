@@ -714,15 +714,21 @@
 
   const questionCache = {
     _norm(str) {
-      return (str || '')
+      if (!str) return '';
+      let pure = str;
+      const qMatch = str.match(/(?:Câu\s*hỏi|Question|Bài\s*tập)[\s:\n\-]+([\s\S]+)$/i);
+      if (qMatch && qMatch[1] && qMatch[1].length > 10) {
+        pure = qMatch[1];
+      }
+      return pure
         .toLowerCase()
         .replace(/[^a-z0-9à-ỹ]/gi, '')
-        .substring(0, 80);
+        .substring(0, 300);
     },
     get(qText) {
       try {
         const k = this._norm(qText);
-        if (k.length < 12) return null;
+        if (k.length < 15) return null;
         const raw = localStorage.getItem('__EDUNEXT_PRENIUM_CACHE__' + k);
         if (raw) {
           const item = JSON.parse(raw);
@@ -737,10 +743,18 @@
     set(qText, ans) {
       try {
         const k = this._norm(qText);
-        if (k.length < 12 || !ans) return;
+        if (k.length < 15 || !ans) return;
         localStorage.setItem('__EDUNEXT_PRENIUM_CACHE__' + k, JSON.stringify({
           ans: ans, time: Date.now()
         }));
+      } catch (_) {}
+    },
+    delete(qText) {
+      try {
+        const k = this._norm(qText);
+        if (k.length >= 15) {
+          localStorage.removeItem('__EDUNEXT_PRENIUM_CACHE__' + k);
+        }
       } catch (_) {}
     }
   };
@@ -2298,8 +2312,52 @@
       return null;
     },
 
+    extractBotHintText(text) {
+      if (!text || typeof text !== 'string') return '';
+      const hintBlocks = [];
+      const hintRegex = /(?:(?:^|\n)\s*(?:Gợi\s*ý|Lưu\s*ý|Ghi\s*chú|Note|Chỉ\s*dẫn|Hướng\s*dẫn)[\s:\n\-]+)([\s\S]+?)(?=(?:(?:^|\n)\s*(?:Câu\s*hỏi|Question|Bài\s*tập|INT:|Feedback|Trả\s*lời|Hãy\s*trả\s*lời|$)))/gi;
+      let m;
+      while ((m = hintRegex.exec(text)) !== null) {
+        const rawHint = (m[1] || '')
+          .replace(/^[0-9a-f]{24,}\b/gim, '')
+          .replace(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/gim, '')
+          .replace(/\b\d{2}:\d{2}:\d{2}\s+\d{1,2}\/\d{1,2}\/\d{4}\b/g, '')
+          .replace(/!\[.*?\]\([^\)]+\)/g, '')
+          .replace(/\[\+?\d+\]/g, '')
+          .trim();
+        if (rawHint.length > 8 && !hintBlocks.some(h => h.includes(rawHint) || rawHint.includes(h))) {
+          hintBlocks.push(rawHint);
+        }
+      }
+      return hintBlocks.join('\n\n');
+    },
+
+    extractBotHintsFromDOM(container) {
+      if (!container) return '';
+      const hints = [];
+      const selectors = [
+        '[class*="hint"]', '[class*="suggestion"]', '[class*="guidance"]',
+        '[class*="note-"]', '[class*="_note"]', '.ant-collapse-item', '.ant-collapse-content',
+        '.ant-alert', '[data-testid*="hint"]', '.w-chat-input__hint', '[class*="rubric"]'
+      ];
+      for (const sel of selectors) {
+        try {
+          const els = container.querySelectorAll(sel);
+          for (const el of els) {
+            const t = sanitizeText(el.textContent || '');
+            if (t.length > 10 && !/Enter để gửi|Shift\+Enter/i.test(t) && !hints.some(h => h.includes(t))) {
+              hints.push(t);
+            }
+          }
+        } catch (_) {}
+      }
+      return hints.join('\n\n');
+    },
+
     splitFeedbackAndQuestion(rawText) {
-      if (!rawText) return { feedback: '', question: '' };
+      if (!rawText) return { feedback: '', question: '', hint: '' };
+      let foundHint = this.extractBotHintText(rawText);
+
       const qMarkerRegex = /(?:(?:Bạn\s*(?:hãy|thử|vui\s*lòng)?\s*(?:làm\s*bài|sửa\s*lại|tính\s*toán\s*lại|suy\s*nghĩ\s*lại|trả\s*lời|hoàn\s*thành)[^:\n]*:?\s*)*(?:Câu\s*hỏi\s*(?:\d+)?[\s:\n\-]+|Question\s*(?:\d+)?[\s:\n\-]+|Bài\s*(?:tập|toán)\s*(?:\d+)?[\s:\n\-]+)|(?:Bạn\s*(?:hãy|thử|vui\s*lòng)\s*(?:làm\s*bài|sửa\s*lại|tính\s*toán\s*lại|suy\s*nghĩ\s*lại|hoàn\s*thành)[^:\n]*:?\s*))/i;
       const match = rawText.match(qMarkerRegex);
       if (match && typeof match.index === 'number') {
@@ -2307,10 +2365,15 @@
         let questionPart = rawText.substring(match.index + match[0].length).trim();
         const fmtIdx = questionPart.search(/(?:Hãy\s*trả\s*lời\s*theo\s*định\s*dạng|Format\s*trả\s*lời|Định\s*dạng\s*trả\s*lời)[\s\S]*$/i);
         if (fmtIdx > 15) {
+          const trailingPart = questionPart.substring(fmtIdx);
           questionPart = questionPart.substring(0, fmtIdx).trim();
+          const trailingHint = this.extractBotHintText(trailingPart);
+          if (trailingHint && !foundHint.includes(trailingHint)) {
+            foundHint = foundHint ? (foundHint + '\n\n' + trailingHint) : trailingHint;
+          }
         }
         if (questionPart.length > 10) {
-          return { feedback: feedbackPart, question: questionPart };
+          return { feedback: feedbackPart, question: questionPart, hint: foundHint };
         }
       }
       const mathStarter = rawText.match(/(?:^|\n\n|\.\s+)(Cho\s+|Tính\s+|Tìm\s+|Xác\s*định\s+|Trong\s+không\s*gian\s+|Trong\s+mặt\s*phẳng\s+|Giải\s+phương\s*trình\s+)([\s\S]+)$/i);
@@ -2318,10 +2381,17 @@
         const feedbackPart = rawText.substring(0, mathStarter.index).trim();
         let questionPart = rawText.substring(mathStarter.index).replace(/^[\.\s]+/, '').trim();
         const fmtIdx = questionPart.search(/(?:Hãy\s*trả\s*lời\s*theo\s*định\s*dạng|Format\s*trả\s*lời|Định\s*dạng\s*trả\s*lời)[\s\S]*$/i);
-        if (fmtIdx > 15) questionPart = questionPart.substring(0, fmtIdx).trim();
-        if (questionPart.length > 10) return { feedback: feedbackPart, question: questionPart };
+        if (fmtIdx > 15) {
+          const trailingPart = questionPart.substring(fmtIdx);
+          questionPart = questionPart.substring(0, fmtIdx).trim();
+          const trailingHint = this.extractBotHintText(trailingPart);
+          if (trailingHint && !foundHint.includes(trailingHint)) {
+            foundHint = foundHint ? (foundHint + '\n\n' + trailingHint) : trailingHint;
+          }
+        }
+        if (questionPart.length > 10) return { feedback: feedbackPart, question: questionPart, hint: foundHint };
       }
-      return { feedback: '', question: rawText };
+      return { feedback: '', question: rawText, hint: foundHint };
     },
 
     findOriginalQuestionInChat() {
@@ -2501,6 +2571,7 @@
               source: 'chat_turn',
               feedback: feedbackInfo,
               feedbackText: split.feedback || cleanTurnText,
+              botHint: split.hint || '',
               questionText: split.question || '',
               text: split.question && split.question.length > 15 ? split.question : cleanTurnText,
               element: turnLastEl,
@@ -2516,6 +2587,7 @@
               source: 'chat_turn',
               text: finalQText,
               questionText: finalQText,
+              botHint: split.hint || '',
               element: turnLastEl,
               turnMsgs: turnMsgs,
               feedback: feedbackInfo
@@ -3166,10 +3238,13 @@
       }
       if (turnLastEl) {
         try {
-          const snapBase64 = await captureElementToCanvasBase64(turnLastEl);
-          if (snapBase64 && snapBase64.startsWith('data:image/')) {
-            allImages.unshift(snapBase64);
-            log('VISION', '📸 [PRENIUM SNAPSHOT]: Đã chụp màn hình phân vùng câu hỏi thành công (Multimodal Vision Ready)!');
+          const hasVisual = turnLastEl.querySelector('canvas, svg:not(.anticon svg), [class*="diagram"], [class*="chart"]') || (allImages.length > 0);
+          if (hasVisual) {
+            const snapBase64 = await captureElementToCanvasBase64(turnLastEl);
+            if (snapBase64 && snapBase64.startsWith('data:image/')) {
+              allImages.unshift(snapBase64);
+              log('VISION', '📸 [PRENIUM SNAPSHOT]: Đã chụp màn hình phân vùng câu hỏi thành công (Multimodal Vision Ready)!');
+            }
           }
         } catch (_) {}
       }
@@ -3226,10 +3301,16 @@
         /bằng\s*bao\s*nhiêu|tính\s*(?:toán|giá\s*trị|diện\s*tích|thể\s*tích|khối\s*lượng|nồng\s*độ|vận\s*tốc|chu\s*kỳ|tần\s*số|công\s*suất|năng\s*lượng)|kết\s*quả\s*là|giá\s*trị\s*(?:của|bằng)|\[Bảng\s*dữ\s*liệu\]/i.test(combinedText)
       );
 
-      let extractedBotHint = '';
-      const hintMatch = combinedText.match(/(?:Tôi\s*nhận\s*thấy|Lưu\s*ý|Gợi\s*ý|Nhận\s*xét|Phản\s*hồi|chưa\s*hoàn\s*chỉnh|chưa\s*chỉ\s*ra|sửa\s*lại\s*câu\s*trả\s*lời)[\s\S]*?(?:Bạn\s*thử\s*sửa\s*lại|Hãy\s*sửa\s*lại|Câu\s*hỏi|Question|Task)/i);
-      if (hintMatch) {
-        extractedBotHint = hintMatch[0].replace(/(?:Bạn\s*thử\s*sửa\s*lại|Hãy\s*sửa\s*lại|Câu\s*hỏi|Question|Task)[\s\S]*$/i, '').trim();
+      let extractedBotHint = candidate.botHint || '';
+      const textHints = this.extractBotHintText(combinedText);
+      if (textHints && !extractedBotHint.includes(textHints)) {
+        extractedBotHint = extractedBotHint ? (extractedBotHint + '\n\n' + textHints) : textHints;
+      }
+      if (turnLastEl) {
+        const domHints = this.extractBotHintsFromDOM(turnLastEl);
+        if (domHints && !extractedBotHint.includes(domHints)) {
+          extractedBotHint = extractedBotHint ? (extractedBotHint + '\n\n' + domHints) : domHints;
+        }
       }
 
       if (hasChoiceOptions) questionType = 'MULTIPLE_CHOICE';
@@ -3747,9 +3828,16 @@ ${langRules}
     - MÔN TIN HỌC (INFORMATICS):
       + Ứng dụng AI trong y tế (IBM Watson for Oncology), khoa học, đời sống; đạo đức AI.
       + Mạng máy tính (Router, Switch, IP, TCP/IP), HTML/CSS (thẻ danh sách, bảng, form), lập trình Python chuẩn THPT.
-    - MÔN HÓA HỌC (CHEMISTRY):
-     + Áp dụng danh pháp IUPAC chuẩn SGK mới (methanol, ethanol, ethanoic acid, sulfuric acid, sulfur dioxide...).
-     + Cân bằng đúng phản ứng, bảo toàn khối lượng, bảo toàn electron, viết công thức hóa học rõ ràng ở dạng văn bản (H2SO4, Fe2O3, Cu(OH)2...).
+    - MÔN HÓA HỌC (CHEMISTRY - CHUẨN SGK MỚI KẾT NỐI TRI THỨC / CÁNH DIỀU / CHÂN TRỜI SÁNG TẠO):
+     + Danh pháp IUPAC: methanol, ethanol, ethanoic acid, methanoic acid, sulfuric acid, sulfur dioxide, buta-1,3-diene, isoprene, hexamethylenediamine, adipic acid, formaldehyde, phenol...
+     + Polymer & Vật liệu mới:
+       * Phản ứng trùng hợp: Monomer phải có liên kết bội C=C hoặc vòng kém bền (ethylene -> PE, propylene -> PP, vinyl chloride -> PVC, styrene -> PS, methyl methacrylate -> PMMA, buta-1,3-diene -> cao su buna).
+       * Phản ứng trùng ngưng: Monomer phải có ít nhất hai nhóm chức phản ứng được với nhau (-COOH, -NH2, -OH...) giải phóng phân tử nhỏ (phenol + formaldehyde -> nhựa PPF, hexamethylenediamine + adipic acid -> tơ nylon-6,6).
+       * Phân loại tơ: Tơ tự nhiên (bông/cellulose, len lông cừu/protein, tơ tằm/protein); Tơ tổng hợp (nylon-6,6, capron, nitron/olon); Tơ bán tổng hợp hay tơ nhân tạo (tơ visco, tơ cellulose acetate - có nguồn gốc từ cellulose tự nhiên được chế biến biến đổi hóa học, KHÔNG PHẢI lấy trực tiếp từ thiên nhiên).
+       * Cao su & Lưu hóa: Cao su tự nhiên (cis-1,4-polyisoprene, cách điện, không dẫn điện, đàn hồi, chống lão hóa kém hơn cao su tổng hợp vì còn liên kết đôi C=C tự do). Cao su tổng hợp (buna, buna-S từ buta-1,3-diene và styrene, buna-N từ buta-1,3-diene và acrylonitrile). Quá trình lưu hóa dùng sulfur tạo cầu nối -S-S- hoặc -Sx- liên kết ngang các chuỗi mạch thẳng thành mạng lưới không gian 3 chiều giúp hạn chế sự trượt tương đối và giúp cao su phục hồi hình dạng ban đầu.
+       * Keo dán: Nhựa vá săm (cơ chế vật lý do bay hơi dung môi); Keo dán epoxy (cơ chế hóa học: phản ứng mở vòng giữa nhóm epoxy và chất đóng rắn amine tạo mạng lưới 3 chiều); Keo poly(urea-formaldehyde) (chất tham gia trực tiếp tạo mạng lưới polymer ba chiều là formaldehyde dư hoặc chất đóng rắn; acid chỉ đóng vai trò chất xúc tác thúc đẩy phản ứng).
+       * Vật liệu composite: Gồm vật liệu cốt (sợi thủy tinh, sợi carbon, hạt) đóng vai trò chịu lực chính và vật liệu nền (polymer, kim loại, gốm ceramic) đóng vai trò liên kết, định hình, truyền lực và bảo vệ cốt. Khi chịu tải kéo 1 hướng, sợi cốt phải bố trí song song dọc theo hướng chịu lực chính.
+     + Tuyệt đối phân biệt rõ chất xúc tác (chỉ làm tăng tốc độ phản ứng) với thành phần tham gia tạo cấu trúc mạng lưới polymer khi đề bài yêu cầu.
 4. ĐỊNH DẠNG ĐÁP ÁN:
    - Nếu đề bài yêu cầu "Trả lời: [đáp án]" hoặc "Trả lời: ..." thì BẮT BUỘC chỉ xuất:
      Trả lời: <nội dung đáp án cụ thể>
@@ -3928,6 +4016,8 @@ LỊCH SỬ CÁC CÂU HỎI VỪA HOÀN THÀNH TRONG BÀI HỌC (tham khảo ti�
         }
       }
 
+      const effectiveHint = (STATE.lastBotHintText || botHint || '').trim();
+
       if (isRetrying) {
         const wrongList = (STATE.wrongAnswers && STATE.wrongAnswers.length > 0)
           ? STATE.wrongAnswers
@@ -3937,17 +4027,17 @@ LỊCH SỬ CÁC CÂU HỎI VỪA HOÀN THÀNH TRONG BÀI HỌC (tham khảo ti�
         if (botFeedback) {
           p += `📢 THÔNG BÁO BÁO SAI & NHẬN XÉT CỦA BÊN AI WEB:\n"${botFeedback}"\n\n`;
         }
-        if (botHint) {
-          p += `💡 GỢI Ý ĐỊNH HƯỚNG TỪ AI WEB:\n"${botHint}"\n\n`;
+        if (effectiveHint) {
+          p += `💡 GỢI Ý & HƯỚNG DẪN QUAN TRỌNG TỪ HỆ THỐNG / GIÁO VIÊN (BẮT BUỘC BÁM SÁT ĐỂ ĐẠT 100% ĐIỂM):\n"${effectiveHint}"\n\n`;
         }
         if (wrongList.length > 0) {
-          p += `⛔ CÁC ĐÁP ÁN ĐÃ THỬ VÀ BỊ TỪ CHỐI (CẤM LẶP LẠI): ${wrongList.join(', ')}\n\n`;
+          p += `⛔ CÁC ĐÁP ÁN ĐÃ THỬ VÀ BỊ TỪ CHỐI (TUYỆT ĐỐI CẤM LẶP LẠI): ${wrongList.join(', ')}\n\n`;
         }
-        p += `👉 BẮT BUỘC: Dựa vào đề bài gốc và nhận xét/gợi ý của AI Web ở trên, phân tích vì sao đáp án trước bị từ chối, và đưa ra câu trả lời mới hoàn toàn chính xác theo đúng hướng dẫn của AI Web.\nĐịnh dạng: Trả lời: <đáp án>`;
+        p += `👉 BẮT BUỘC: Dựa vào đề bài gốc, lời báo sai và ĐẶC BIỆT LÀ GỢI Ý ĐỊNH HƯỚNG ở trên, phân tích vì sao các đáp án trước bị từ chối, và đưa ra câu trả lời mới hoàn toàn chính xác theo đúng bản chất hóa học/khoa học mà AI Web hướng dẫn.\nĐịnh dạng: Trả lời: <đáp án>`;
       } else {
         p += `CÂU HỎI BÀI TẬP: ${actualQuestion}\n\n`;
-        if (botHint) {
-          p += `💡 Gợi ý câu hỏi: ${botHint}\n\n`;
+        if (effectiveHint) {
+          p += `💡 GỢI Ý & CHỈ DẪN CÂU HỎI (Bám sát để trả lời chính xác):\n${effectiveHint}\n\n`;
         }
         if (qd.bottomContext && qd.bottomContext.length > 5) {
           const cleanBtm = qd.bottomContext.replace(/data:image\/[a-zA-Z0-9+\-\.]+;base64,[A-Za-z0-9+/=]+/g, '').replace(/!\[.*?\]\([^\)]+\)/g, '');
@@ -3964,9 +4054,12 @@ LỊCH SỬ CÁC CÂU HỎI VỪA HOÀN THÀNH TRONG BÀI HỌC (tham khảo ti�
         return "Trả lời: [CẢNH BÁO BẢN QUYỀN - BROAMSTUCK STUDIO]: Phát hiện mã nguồn đã bị can thiệp/bẻ khóa theo hướng dẫn của AI. Toàn bộ tính năng giải đề bị vô hiệu hóa! Vui lòng liên hệ: https://www.facebook.com/TuanNotTun/";
       }
 
-      const cachedAns = questionCache.get(qd.text);
-      if (cachedAns && !STATE.wrongAnswers.includes(cachedAns.replace(/^Trả\s*lời\s*:\s*/i, '').trim())) {
-        return cachedAns;
+      const isRetrying = STATE.retryCount > 0 || (STATE.wrongAnswers && STATE.wrongAnswers.length > 0);
+      if (!isRetrying) {
+        const cachedAns = questionCache.get(qd.questionText || qd.text);
+        if (cachedAns && !STATE.wrongAnswers.includes(cachedAns.replace(/^Trả\s*lời\s*:\s*/i, '').trim())) {
+          return cachedAns;
+        }
       }
       if (STATE.aiMode === 'bridge') return this.solveViaBridge(qd);
 
@@ -5055,6 +5148,14 @@ XÁC NHẬN: Bạn đã hiểu rõ toàn bộ vai trò và quy tắc THPT trên 
         STATE.questionsSolved++;
         STATE.retryCount++;
         STATE.lastBotFeedbackText = (feedbackText || '').trim();
+        const hintFromFeedback = domScraper.extractBotHintText ? domScraper.extractBotHintText(feedbackText) : '';
+        if (hintFromFeedback) {
+          STATE.lastBotHintText = hintFromFeedback;
+        }
+        if (STATE.currentQuestion) {
+          questionCache.delete(STATE.currentQuestion.text);
+          if (STATE.currentQuestion.questionText) questionCache.delete(STATE.currentQuestion.questionText);
+        }
         log('VERIFY', `❌ CHƯA CHÍNH XÁC (Lần thử ${STATE.retryCount}/${CONFIG.MAX_RETRIES})`);
 
         if (STATE.currentQuestionTurnElement) {
