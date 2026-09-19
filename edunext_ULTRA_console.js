@@ -2268,6 +2268,96 @@
       return null;
     },
 
+    findOriginalQuestionInChat() {
+      const msgs = this.getChatMessages();
+      if (msgs.length === 0) return '';
+      let userMsgIdx = -1;
+      for (let i = msgs.length - 1; i >= 0; i--) {
+        if (msgs[i].role === 'user') {
+          userMsgIdx = i;
+          break;
+        }
+      }
+      const searchEnd = userMsgIdx > 0 ? userMsgIdx : msgs.length;
+      for (let i = searchEnd - 1; i >= 0; i--) {
+        const m = msgs[i];
+        if (m.role === 'assistant') {
+          const isFeedback = /chưa\s*đúng|chưa\s*chính\s*xác|sai\s*rồi|not\s*quite|incorrect|tuy\s*nhiên|nhưng\s*mới|chưa\s*đủ|chưa\s*hoàn\s*chỉnh|sửa\s*lại|thử\s*lại/i.test(m.text);
+          if (!isFeedback && m.text.length > 15) {
+            return this.extractCleanText(m.element, m.text);
+          }
+        }
+      }
+      return '';
+    },
+
+    findExerciseBlockQuestion() {
+      const universalSelectors = [
+        CONFIG.SELECTORS.EXERCISE_BLOCK,
+        '[data-testid*="exercise-question"]',
+        '[data-testid*="question"]',
+        '[data-testid*="exercise"]',
+        '.exercise-question-block',
+        '.exercise-container',
+        '.question-card',
+        '.question-content',
+        '.question-detail',
+        '.w-exercise',
+        '[class*="exercise-question"]',
+        '[class*="QuestionDetail"]',
+        '[class*="question-content"]',
+        '.ant-tabs-tabpane-active .markdown-body',
+        '.markdown-body'
+      ];
+      let best = '';
+      let bestScore = 0;
+      for (const sel of universalSelectors) {
+        let els = [];
+        try { els = Array.from(document.querySelectorAll(sel)); } catch (_) {}
+        for (const el of els) {
+          if (!el || !el.isConnected) continue;
+          if (el.closest('.di-c') || el.closest('#broamstuck-di-root')) continue;
+          if (el.offsetParent === null && !el.offsetHeight) continue;
+          const txt = this.extractCleanText(el, el.textContent || '');
+          if (txt.length < 15) continue;
+          const s = this.calculateQuestionScore(el, txt);
+          if (s > bestScore && s >= 35) {
+            bestScore = s;
+            best = txt;
+          }
+        }
+      }
+      return best;
+    },
+
+    extractFullWebContext() {
+      try {
+        const parts = [];
+        const titleEl = document.querySelector('.w-lesson-header, .lesson-title, .ant-breadcrumb, h1, h2');
+        if (titleEl) {
+          const t = sanitizeText(titleEl.textContent || '');
+          if (t.length > 3) parts.push(`📖 TIÊU ĐỀ BÀI HỌC: ${t}`);
+        }
+        const activeTab = document.querySelector('.ant-tabs-tab-active, [class*="tab--active"]');
+        if (activeTab) {
+          const tabName = sanitizeText(activeTab.textContent || '');
+          if (tabName) parts.push(`📑 PHÂN MỤC HIỆN TẠI: ${tabName}`);
+        }
+        const msgs = this.getChatMessages();
+        if (msgs.length > 0) {
+          const recent = msgs.slice(-6);
+          const turns = recent.map(m => {
+            const roleName = m.role === 'user' ? 'Học sinh' : 'AI Web (EduNext)';
+            return `${roleName}: ${m.text.substring(0, 300)}`;
+          });
+          parts.push(`💬 DIỄN BIẾN PHIÊN HỘI THOẠI TRÊN WEB:\n${turns.join('\n')}`);
+        }
+        return parts.join('\n\n');
+      } catch (_) {
+        return '';
+      }
+    },
+
     calculateQuestionScore(el, text) {
       if (!text || text.length < 8) return 0;
       if (this.isReadyPrompt(text)) return 0;
@@ -2344,6 +2434,16 @@
             return { type: 'ready_prompt', text: cleanTurnText, element: turnLastEl };
           }
           const feedbackInfo = this.checkFeedbackBanner(turnLastEl, cleanTurnText);
+          if (feedbackInfo.hasFeedback) {
+            return {
+              type: 'feedback',
+              feedback: feedbackInfo,
+              feedbackText: cleanTurnText,
+              text: cleanTurnText,
+              element: turnLastEl,
+              turnMsgs: turnMsgs
+            };
+          }
           const isQ = this.isQuestion(turnLastEl, cleanTurnText) || turnMsgs.some(m => this.isQuestion(m.element, m.text));
           if (isQ) {
             return {
@@ -2354,9 +2454,6 @@
               turnMsgs: turnMsgs,
               feedback: feedbackInfo
             };
-          }
-          if (feedbackInfo.hasFeedback) {
-            return { type: 'feedback', feedback: feedbackInfo, text: cleanTurnText, element: turnLastEl };
           }
         }
       }
@@ -2508,11 +2605,12 @@
       }
 
       if (candidate.type === 'feedback') {
-        const fp = candidate.feedback.result + '_' + candidate.text.substring(0, 60);
+        const fbText = candidate.feedbackText || candidate.text || '';
+        const fp = candidate.feedback.result + '_' + fbText.substring(0, 60);
         if (STATE.fsmState === FSM_STATE.EVALUATING || STATE.lastFeedbackFingerprint !== fp) {
           STATE.lastFeedbackFingerprint = fp;
-          log('VERIFY', `📊 Nhận kết quả đánh giá: ${candidate.feedback.result} - "${candidate.text.substring(0, 60)}..."`);
-          fsmController.handleFeedback(candidate.feedback.result, candidate.text);
+          log('VERIFY', `📊 Nhận kết quả đánh giá: ${candidate.feedback.result} - "${fbText.substring(0, 60)}..."`);
+          fsmController.handleFeedback(candidate.feedback.result, fbText);
         }
         return;
       }
@@ -2531,12 +2629,12 @@
         }
 
         if (candidate.feedback && candidate.feedback.hasFeedback) {
-          const fp = candidate.feedback.result + '_' + qText.substring(0, 60);
+          const fbText = candidate.feedbackText || candidate.text || '';
+          const fp = candidate.feedback.result + '_' + fbText.substring(0, 60);
           if (STATE.fsmState === FSM_STATE.EVALUATING || STATE.lastFeedbackFingerprint !== fp) {
             STATE.lastFeedbackFingerprint = fp;
-            STATE.activeQuestionCandidate = candidate;
-            log('VERIFY', `📊 Nhận kết quả đánh giá: ${candidate.feedback.result} - "${qText.substring(0, 60)}..."`);
-            fsmController.handleFeedback(candidate.feedback.result, qText);
+            log('VERIFY', `📊 Nhận kết quả đánh giá: ${candidate.feedback.result} - "${fbText.substring(0, 60)}..."`);
+            fsmController.handleFeedback(candidate.feedback.result, fbText);
             return;
           }
           log('DETECT', '💡 Phát hiện câu hỏi bài tập tiếp theo đi kèm nhận xét!');
@@ -2952,6 +3050,18 @@
         }
       }
 
+      if (candidate.type === 'feedback' || this.checkFeedbackBanner(turnLastEl, combinedText).hasFeedback) {
+        const exQ = this.findExerciseBlockQuestion();
+        const chatQ = this.findOriginalQuestionInChat();
+        if (exQ && exQ.length > 15) {
+          combinedText = exQ;
+        } else if (chatQ && chatQ.length > 15) {
+          combinedText = chatQ;
+        } else if (STATE.currentQuestion && STATE.currentQuestion.text && STATE.currentQuestion.text.length > 15 && !this.checkFeedbackBanner(null, STATE.currentQuestion.text).hasFeedback) {
+          combinedText = STATE.currentQuestion.text;
+        }
+      }
+
       log('VISION', `Đang chuẩn bị dữ liệu câu hỏi [${candidate.source || 'universal'}]: "${combinedText.substring(0, 60)}..."`);
 
       let allImages = [];
@@ -2976,8 +3086,12 @@
       allImages = Array.from(new Set(allImages));
       if (allImages.length > 0) log('VISION', `🖼 Thu thập được ${allImages.length} hình ảnh câu hỏi`);
 
-      const lessonCtx = this.extractLessonContext();
-      if (lessonCtx) log('VISION', `📖 Đọc được ngữ cảnh tài liệu (${lessonCtx.length} ký tự)`);
+      let lessonCtx = this.extractLessonContext();
+      const webTimeline = this.extractFullWebContext();
+      if (webTimeline) {
+        lessonCtx = (lessonCtx ? lessonCtx + '\n\n' : '') + webTimeline;
+      }
+      if (lessonCtx) log('VISION', `📖 Đọc được ngữ cảnh tài liệu & Web (${lessonCtx.length} ký tự)`);
 
       const bottomCtx = this.extractBottomContext();
       if (bottomCtx && bottomCtx.length > 5) log('VISION', `📎 Dữ kiện phụ trợ: "${bottomCtx.substring(0, 55)}..."`);
@@ -3666,34 +3780,47 @@ LỊCH SỬ CÁC CÂU HỎI VỪA HOÀN THÀNH TRONG BÀI HỌC (tham khảo ti�
 
     buildCondensedBridgePrompt(qd) {
       const _0xCANARY = '\u200B\u200C\u200D\uFEFF\u200B\u200C\u200D';
-      const isRetrying = STATE.retryCount > 0 || (STATE.conversationHistory.length > 0 && (STATE.conversationHistory[STATE.conversationHistory.length - 1].question || '').substring(0, 50) === (qd.text || '').substring(0, 50)) || (STATE.wrongAnswers && STATE.wrongAnswers.length > 0);
+      const isRetrying = STATE.retryCount > 0 || (STATE.wrongAnswers && STATE.wrongAnswers.length > 0);
       let p = '';
+
+      let actualQuestion = (qd.questionText || qd.text || '').trim();
+      const botFeedback = (STATE.lastBotFeedbackText || qd.botFeedback || qd.botHint || '').trim();
+      const botHint = (qd.botHint && qd.botHint !== botFeedback) ? qd.botHint.trim() : '';
+
+      if (!actualQuestion || actualQuestion.length < 15 || domScraper.checkFeedbackBanner(null, actualQuestion).hasFeedback) {
+        const exQ = domScraper.findExerciseBlockQuestion();
+        const chatQ = domScraper.findOriginalQuestionInChat();
+        if (exQ && exQ.length > 15) actualQuestion = exQ;
+        else if (chatQ && chatQ.length > 15) actualQuestion = chatQ;
+      }
+
       if (isRetrying) {
         const wrongList = (STATE.wrongAnswers && STATE.wrongAnswers.length > 0)
           ? STATE.wrongAnswers
           : [(STATE.conversationHistory[STATE.conversationHistory.length - 1]?.answer || '').replace(/^Trả\s*lời\s*:\s*/i, '').trim()].filter(Boolean);
-        p += `🚨 [THỬ LẠI LẦN ${STATE.retryCount || 1}]:\n`;
+
+        p += `🚨 [YÊU CẦU GIẢI LẠI - AI WEB ĐÃ BÁO CHƯA ĐÚNG]:\n\n`;
+        if (botFeedback) {
+          p += `📢 THÔNG BÁO BÁO SAI & NHẬN XÉT CỤ THỂ TỪ AI WEB:\n"${botFeedback}"\n\n`;
+        }
+        if (botHint) {
+          p += `💡 GỢI Ý ĐỊNH HƯỚNG TỪ AI WEB:\n"${botHint}"\n\n`;
+        }
         if (wrongList.length > 0) {
-          p += `⛔ Các đáp án đã sai (CẤM lặp lại): ${wrongList.join(', ')}\n`;
+          p += `⛔ CÁC ĐÁP ÁN ĐÃ THỬ VÀ BỊ TỪ CHỐI (TUYỆT ĐỐI CẤM LẶP LẠI):\n${wrongList.join(', ')}\n\n`;
         }
-        if (STATE.lastBotFeedbackText) {
-          p += `🎯 Gợi ý/Nhận xét của giáo viên: "${STATE.lastBotFeedbackText}"\n`;
-        }
-        if (qd.botHint) {
-          p += `💡 Gợi ý hệ thống: ${qd.botHint}\n`;
-        }
-        p += `👉 Đưa ra đáp án hoàn toàn mới, chính xác theo gợi ý trên. Định dạng: Trả lời: <nội dung>\n\n`;
-        p += `CÂU HỎI:\n${qd.text}`;
+        p += `CÂU HỎI GỐC CỦA ĐỀ BÀI CẦN GIẢI:\n${actualQuestion}\n\n`;
+        p += `👉 BẮT BUỘC: Hãy đọc kỹ thông báo báo sai và gợi ý của bên AI Web ở trên, phân tích vì sao đáp án trước bị từ chối, và đưa ra câu trả lời mới hoàn toàn chính xác theo đúng hướng dẫn của AI Web.\nĐịnh dạng: Trả lời: <đáp án>`;
       } else {
         p += `Tiếp tục làm bài theo các quy tắc THPT chuẩn đã thiết lập (Phong cách /human thuần túy, tuyệt đối KHÔNG markdown, KHÔNG latex, KHÔNG ký tự $, định dạng "Trả lời: <đáp án>").\n\n`;
-        if (qd.botHint) {
-          p += `💡 Gợi ý câu hỏi: ${qd.botHint}\n\n`;
+        if (botHint) {
+          p += `💡 Gợi ý câu hỏi: ${botHint}\n\n`;
         }
         if (qd.bottomContext && qd.bottomContext.length > 5) {
           const cleanBtm = qd.bottomContext.replace(/data:image\/[a-zA-Z0-9+\-\.]+;base64,[A-Za-z0-9+/=]+/g, '').replace(/!\[.*?\]\([^\)]+\)/g, '');
           p += `Dữ kiện bổ sung: ${cleanBtm.substring(0, 3000)}\n\n`;
         }
-        p += `CÂU HỎI TIẾP THEO:\n${qd.text}`;
+        p += `CÂU HỎI TIẾP THEO:\n${actualQuestion}`;
       }
       return p + _0xCANARY;
     },
@@ -4215,9 +4342,6 @@ LỊCH SỬ CÁC CÂU HỎI VỪA HOÀN THÀNH TRONG BÀI HỌC (tham khảo ti�
         if (!STATE.bridgeWindow || STATE.bridgeWindow.closed) {
           STATE.bridgeWindow = window.open('https://gemini.google.com/', 'edunext_gemini_bridge_tab');
         }
-        if (STATE.bridgeWindow && typeof STATE.bridgeWindow.focus === 'function') {
-          try { STATE.bridgeWindow.focus(); } catch (_) {}
-        }
       } catch (_) {}
 
       const reqObj = {
@@ -4288,9 +4412,6 @@ LỊCH SỬ CÁC CÂU HỎI VỪA HOÀN THÀNH TRONG BÀI HỌC (tham khảo ti�
           if (rawAns) {
             rawAns = rawAns.replace(/^\`\`\`(?:markdown|text)?\s*/i, '').replace(/\s*\`\`\`$/i, '').trim();
             log('BRIDGE', `✅ Nhận đáp án từ tab Gemini: "${rawAns.substring(0, 80)}..."`);
-            try {
-              window.focus();
-            } catch (_) {}
             resolve(rawAns);
           } else {
             log('BRIDGE', '⚠️ Tab Gemini trả về nội dung rỗng. Tự động chuyển tiếp sang Tuyến API Đa Key VIP...', 'warn');
@@ -4555,7 +4676,16 @@ LỊCH SỬ CÁC CÂU HỎI VỪA HOÀN THÀNH TRONG BÀI HỌC (tham khảo ti�
 
     async runExtraction() {
       log('VISION', '🔍 Đang bóc tách câu hỏi, ảnh và tài liệu...');
-      const data = await domScraper.extractQuestionData();
+      let data = null;
+      if (STATE.retryCount > 0 && STATE.currentQuestion && STATE.currentQuestion.text && STATE.currentQuestion.text.length > 15 && !domScraper.checkFeedbackBanner(null, STATE.currentQuestion.text).hasFeedback) {
+        data = { ...STATE.currentQuestion };
+        data.botFeedback = STATE.lastBotFeedbackText;
+        data.botHint = STATE.lastBotFeedbackText;
+        data.retryCount = STATE.retryCount;
+        log('VISION', `🔄 [Tự sửa sai]: Giữ nguyên câu hỏi gốc (${data.text.length} ký tự) & tiếp thu nhận xét mới từ AI Web`);
+      } else {
+        data = await domScraper.extractQuestionData();
+      }
       if (!data || !data.text || data.text.length < 5) {
         log('VISION', '❌ Không trích xuất được câu hỏi hợp lệ', 'error');
         this.transition(FSM_STATE.IDLE);
@@ -5512,10 +5642,6 @@ LỊCH SỬ CÁC CÂU HỎI VỪA HOÀN THÀNH TRONG BÀI HỌC (tham khảo ti�
       try {
         console.log(`[EduNext Bridge] Nhận câu hỏi: ${req.id.substring(0, 8)}... (Ảnh: ${!!req.imageBase64})`);
         reportStatus(req.id, 'HANDSHAKE', 'Tab Gemini đã tiếp nhận yêu cầu giải đề...');
-        try {
-          window.focus();
-          if (document.body) document.body.focus();
-        } catch (_) {}
         setBadge('🌉 Đang nhận câu hỏi từ EduNext...', '#f59e0b');
         updateGeminiTabTitle('[📥 Nhận đề]');
         reportStatus(req.id, 'RECEIVING', 'Tab Gemini đã nhận được câu hỏi từ EduNext');
@@ -7077,9 +7203,6 @@ LỊCH SỬ CÁC CÂU HỎI VỪA HOÀN THÀNH TRONG BÀI HỌC (tham khảo ti�
     $('#bOpenGemini')?.addEventListener('click', () => {
       log('BRIDGE', '🚀 Mở tab gemini.google.com...');
       STATE.bridgeWindow = window.open('https://gemini.google.com/app', 'edunext_gemini_bridge_tab');
-      if (STATE.bridgeWindow && typeof STATE.bridgeWindow.focus === 'function') {
-        try { STATE.bridgeWindow.focus(); } catch (_) {}
-      }
       const liveEl = $('#bridgeLiveSt');
       if (liveEl) liveEl.innerHTML = '<span style="color:#818cf8">🟡 Bridge: Đang bắt tay kết nối với Tab Gemini...</span>';
       for (let i = 1; i <= 6; i++) {
