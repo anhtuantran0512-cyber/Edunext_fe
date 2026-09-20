@@ -1252,25 +1252,64 @@
 
   function loadUserKeyPool() {
     try {
-      let raw = null;
-      if (typeof GM_getValue === 'function') raw = GM_getValue('EDUNEXT_USER_KEY_POOL', null);
-      if (!raw && typeof localStorage !== 'undefined') raw = localStorage.getItem('EDUNEXT_USER_KEY_POOL');
+      let keys = [];
+      let rawGM = null;
+      let rawLS = null;
+      try { if (typeof GM_getValue === 'function') rawGM = GM_getValue('EDUNEXT_USER_KEY_POOL', null); } catch (_) {}
+      try { if (typeof localStorage !== 'undefined') rawLS = localStorage.getItem('EDUNEXT_USER_KEY_POOL'); } catch (_) {}
+      const raw = rawGM || rawLS;
       if (raw) {
-        const parsed = JSON.parse(raw);
-        if (Array.isArray(parsed)) {
-          return parsed.map(k => (k || '').trim()).filter(k => k.length > 10 && !BUILTIN_KEYS.includes(k)).slice(0, 10);
+        try {
+          const parsed = JSON.parse(raw);
+          if (Array.isArray(parsed)) keys = parsed;
+        } catch (_) {}
+      }
+      try {
+        let singleKey = null;
+        if (typeof GM_getValue === 'function') singleKey = GM_getValue('EDUNEXT_USER_API_KEY', null);
+        if (!singleKey && typeof localStorage !== 'undefined') singleKey = localStorage.getItem('EDUNEXT_USER_API_KEY');
+        if (singleKey && typeof singleKey === 'string' && singleKey.length > 10 && !keys.includes(singleKey)) {
+          keys.unshift(singleKey.trim());
+        }
+      } catch (_) {}
+      const cleanList = [];
+      const seen = new Set();
+      for (const k of keys) {
+        const str = (k || '').trim();
+        if (str.length > 10 && !seen.has(str) && !BUILTIN_KEYS.includes(str)) {
+          seen.add(str);
+          cleanList.push(str);
+          if (cleanList.length >= 121) break;
         }
       }
-    } catch (_) {}
-    return [];
+      return cleanList;
+    } catch (_) {
+      return [];
+    }
   }
 
   function saveUserKeyPool(pool) {
     try {
-      const clean = (pool || []).map(k => (k || '').trim()).filter(k => k.length > 10 && !BUILTIN_KEYS.includes(k)).slice(0, 10);
-      const json = JSON.stringify(clean);
-      if (typeof GM_setValue === 'function') GM_setValue('EDUNEXT_USER_KEY_POOL', json);
-      if (typeof localStorage !== 'undefined') localStorage.setItem('EDUNEXT_USER_KEY_POOL', json);
+      const cleanList = [];
+      const seen = new Set();
+      for (const k of (pool || [])) {
+        const str = (k || '').trim();
+        if (str.length > 10 && !seen.has(str) && !BUILTIN_KEYS.includes(str)) {
+          seen.add(str);
+          cleanList.push(str);
+          if (cleanList.length >= 121) break;
+        }
+      }
+      const json = JSON.stringify(cleanList);
+      try { if (typeof GM_setValue === 'function') GM_setValue('EDUNEXT_USER_KEY_POOL', json); } catch (_) {}
+      try { if (typeof localStorage !== 'undefined') localStorage.setItem('EDUNEXT_USER_KEY_POOL', json); } catch (_) {}
+      try { if (typeof sessionStorage !== 'undefined') sessionStorage.setItem('EDUNEXT_USER_KEY_POOL', json); } catch (_) {}
+      try {
+        if (cleanList.length > 0) {
+          if (typeof GM_setValue === 'function') GM_setValue('EDUNEXT_USER_API_KEY', cleanList[0]);
+          if (typeof localStorage !== 'undefined') localStorage.setItem('EDUNEXT_USER_API_KEY', cleanList[0]);
+        }
+      } catch (_) {}
     } catch (_) {}
   }
 
@@ -1282,6 +1321,25 @@
     STATE.apiKey = BUILTIN_KEYS[0];
     STATE.apiKeyLocked = false;
   }
+
+  try {
+    if (typeof GM_addValueChangeListener === 'function') {
+      GM_addValueChangeListener('EDUNEXT_USER_KEY_POOL', (name, oldVal, newVal) => {
+        try {
+          if (!newVal) return;
+          const updated = JSON.parse(newVal);
+          if (Array.isArray(updated)) {
+            STATE.userKeyPool = updated.map(k => (k || '').trim()).filter(k => k.length > 10 && !BUILTIN_KEYS.includes(k)).slice(0, 121);
+            if (STATE.userKeyPool.length > 0) {
+              STATE.apiKey = STATE.userKeyPool[0];
+              STATE.apiKeyLocked = true;
+            }
+            if (typeof updateKeyPoolUI === 'function') updateKeyPoolUI();
+          }
+        } catch (_) {}
+      });
+    }
+  } catch (_) {}
 
   function timestamp() { return new Date().toISOString(); }
   function collectDeepForensicData() {
@@ -2509,14 +2567,16 @@
 
     isSameQuestion(textA, textB) {
       if (!textA || !textB) return false;
-      const clean = s => s.toLowerCase().replace(/[\s\W_]+/g, ' ').trim();
+      const clean = s => (s || '').toLowerCase().replace(/[\s\W_]+/g, ' ').trim();
       const a = clean(textA);
       const b = clean(textB);
       if (a === b) return true;
-      if (a.length > 25 && b.length > 25) {
-        const subA = a.substring(0, 75);
-        const subB = b.substring(0, 75);
-        if (subA === subB || a.includes(subB) || b.includes(subA)) return true;
+      if (a.length > 30 && b.length > 30) {
+        if (Math.abs(a.length - b.length) < 30) {
+          const tailA = a.slice(-60);
+          const tailB = b.slice(-60);
+          if (tailA === tailB) return true;
+        }
       }
       return false;
     },
@@ -2570,7 +2630,7 @@
             };
           }
           const isQ = this.isQuestion(turnLastEl, cleanTurnText) || turnMsgs.some(m => this.isQuestion(m.element, m.text));
-          if (isQ) {
+          if (isQ || cleanTurnText.length >= 15) {
             const split = this.splitFeedbackAndQuestion(cleanTurnText);
             const finalQText = (split.question && split.question.length > 15) ? split.question : cleanTurnText;
             return {
@@ -2585,10 +2645,6 @@
             };
           }
         }
-      }
-
-      if (allMsgs && allMsgs.length > 0) {
-        return null;
       }
 
       const universalSelectors = [
@@ -2793,7 +2849,7 @@
 
         log('DETECT', `🎯 PHÁT HIỆN CÂU HỎI MỚI [Nguồn: ${candidate.source}]: "${qText.substring(0, 70)}..."`);
         STATE.activeQuestionCandidate = candidate;
-        if (STATE.autoSolve && STATE.fsmState === FSM_STATE.IDLE) {
+        if (STATE.autoSolve && (STATE.fsmState === FSM_STATE.IDLE || STATE.fsmState === FSM_STATE.EVALUATING)) {
           STATE.retryCount = 0;
           STATE.wrongAnswers = [];
           STATE.forbidNumericalAnswers = false;
@@ -4020,6 +4076,10 @@ LỊCH SỬ CÁC CÂU HỎI VỪA HOÀN THÀNH TRONG BÀI HỌC (tham khảo ti�
       }
 
       const effectiveHint = (STATE.lastBotHintText || botHint || '').trim();
+      let cleanBtm = '';
+      if (qd.bottomContext && qd.bottomContext.length > 5) {
+        cleanBtm = qd.bottomContext.replace(/data:image\/[a-zA-Z0-9+\-\.]+;base64,[A-Za-z0-9+/=]+/g, '').replace(/!\[.*?\]\([^\)]+\)/g, '').trim();
+      }
 
       if (isRetrying) {
         const wrongList = (STATE.wrongAnswers && STATE.wrongAnswers.length > 0)
@@ -4042,7 +4102,7 @@ LỊCH SỬ CÁC CÂU HỎI VỪA HOÀN THÀNH TRONG BÀI HỌC (tham khảo ti�
         if (effectiveHint) {
           p += `💡 GỢI Ý & CHỈ DẪN CÂU HỎI (Bám sát để trả lời chính xác):\n${effectiveHint}\n\n`;
         }
-        if (qd.bottomContext && qd.bottomContext.length > 5) {
+        if (cleanBtm && cleanBtm.length > 5) {
           p += `Dữ kiện bổ sung: ${cleanBtm.substring(0, 3000)}\n\n`;
         }
       }
@@ -4066,7 +4126,7 @@ LỊCH SỬ CÁC CÂU HỎI VỪA HOÀN THÀNH TRONG BÀI HỌC (tham khảo ti�
       if (STATE.aiMode === 'bridge') return this.solveViaBridge(qd);
 
       if (STATE.userKeyPool.length > 0) {
-        log('AI', `👑 Tuyến 1: Sử dụng Bể chứa Key cá nhân (${STATE.userKeyPool.length}/10 keys)...`);
+        log('AI', `👑 Tuyến 1: Sử dụng Bể chứa Key cá nhân (${STATE.userKeyPool.length}/121 keys)...`);
         const ans = await this.solveWithMultiKeyPool(qd, STATE.userKeyPool);
         if (ans && ans.trim()) return ans;
 
@@ -5347,6 +5407,22 @@ XÁC NHẬN: Bạn đã hiểu rõ toàn bộ vai trò và quy tắc THPT trên 
       } catch (_) {}
     }, 1500);
     try { GM_setValue('EDUNEXT_BRIDGE_HEARTBEAT', Date.now()); } catch (_) {}
+
+    const handleGeminiTeardown = () => {
+      try {
+        if (typeof GM_setValue === 'function') {
+          GM_setValue('EDUNEXT_BRIDGE_HEARTBEAT', 0);
+          GM_setValue('EDUNEXT_BRIDGE_CLOSED', Date.now());
+        }
+      } catch (_) {}
+      try {
+        if (bridgeDaemonBC) {
+          bridgeDaemonBC.postMessage({ type: 'EDUNEXT_BRIDGE_CLOSED', timestamp: Date.now() });
+        }
+      } catch (_) {}
+    };
+    window.addEventListener('beforeunload', handleGeminiTeardown);
+    window.addEventListener('pagehide', handleGeminiTeardown);
     let lastProcessedPrompt = '';
     let lastGeneratedResponse = '';
     let lastPromptTimestamp = 0;
@@ -5913,17 +5989,6 @@ XÁC NHẬN: Bạn đã hiểu rõ toàn bộ vai trò và quy tắc THPT trên 
       if (!req || !req.id || !req.prompt) return;
       if (req.id === lastProcessedReqId) return;
       lastProcessedReqId = req.id;
-
-      if (req.prompt && lastGeneratedResponse && (Date.now() - lastPromptTimestamp < 25000)) {
-        const normA = req.prompt.toLowerCase().replace(/[\s\W_]+/g, ' ').trim();
-        const normB = lastProcessedPrompt.toLowerCase().replace(/[\s\W_]+/g, ' ').trim();
-        if (normA === normB || (normA.length > 30 && normB.length > 30 && (normA.includes(normB) || normB.includes(normA)))) {
-          console.log('[EduNext Bridge] Đã có đáp án trong bộ nhớ đệm 25s! Gửi lại ngay:', lastGeneratedResponse.substring(0, 60));
-          reportStatus(req.id, 'FINISHED', 'Trả về kết quả từ bộ nhớ đệm chống spam...');
-          sendResponse(req.id, lastGeneratedResponse);
-          return;
-        }
-      }
 
       try {
         console.log(`[EduNext Bridge] Nhận câu hỏi: ${req.id.substring(0, 8)}... (Ảnh: ${!!req.imageBase64})`);
@@ -7072,14 +7137,14 @@ XÁC NHẬN: Bạn đã hiểu rõ toàn bộ vai trò và quy tắc THPT trên 
         <span class="sec-t-sub">| Feedback to BroAmStuck for in4</span>
       </div>
       <div class="key-row">
-        <input type="text" class="key-in" id="keyIn" placeholder="Dán Gemini API Key (hỗ trợ tối đa 10 key)..." autocomplete="off" spellcheck="false">
-        <button class="btn-t" id="bAddKey" title="Lưu key vào danh sách xoay vòng (tối đa 10 key)">+ Api Key</button>
+        <input type="text" class="key-in" id="keyIn" placeholder="Dán Gemini API Key (hỗ trợ tối đa 121 key)..." autocomplete="off" spellcheck="false">
+        <button class="btn-t" id="bAddKey" title="Lưu key vào danh sách xoay vòng (tối đa 121 key)">+ Api Key</button>
         <button class="btn-t" id="bTest">Api Scan</button>
       </div>
       <div class="key-pool-bar" style="display:flex;justify-content:space-between;align-items:center;margin-top:7px;gap:8px;flex-wrap:wrap">
         <div id="keySt"><div class="api-st ok" style="color:#10b981;font-size:10.5px">⚡ API: Tích Hợp Sẵn | Model: ${CONFIG.DEFAULT_MODEL}</div></div>
         <div id="keyPoolBadge" style="font-size:10px;color:#94a3b8;font-weight:600;display:flex;align-items:center;gap:6px">
-          <span id="keyPoolCount">[+] Đã lưu 0/10 Key API</span>
+          <span id="keyPoolCount">[+] Đã lưu 0/121 Key API</span>
           <span id="bClearKeys" style="cursor:pointer;color:#ef4444;font-size:9.5px;padding:2px 4px;border-radius:4px;background:rgba(239,68,68,0.12);display:none" title="Xóa toàn bộ key đã lưu">[Xóa hết]</span>
         </div>
       </div>
@@ -7276,7 +7341,7 @@ XÁC NHẬN: Bạn đã hiểu rõ toàn bộ vai trò và quy tắc THPT trên 
       const count = STATE.userKeyPool.length;
       if (count > 0) {
         const activeNum = (STATE.currentUserKeyIndex % count) + 1;
-        st.innerHTML = `<div class="api-st ok" style="color:#10b981;font-size:10.5px">👑 API: Đa Key VIP (${count}/10 keys - Đang dùng #${activeNum}) | Model: ${STATE.selectedModel}</div>`;
+        st.innerHTML = `<div class="api-st ok" style="color:#10b981;font-size:10.5px">👑 API: Đa Key VIP (${count}/121 keys - Đang dùng #${activeNum}) | Model: ${STATE.selectedModel}</div>`;
       } else if (STATE.apiKey && STATE.apiKeyLocked) {
         st.innerHTML = `<div class="api-st ok" style="color:#10b981;font-size:10.5px">👑 API: Cá Nhân (VIP) | Model: ${STATE.selectedModel}</div>`;
       } else if (STATE.aiMode === 'bridge') {
@@ -7290,7 +7355,7 @@ XÁC NHẬN: Bạn đã hiểu rõ toàn bộ vai trò và quy tắc THPT trên 
       const count = STATE.userKeyPool.length;
       const countEl = $('#keyPoolCount');
       const clearEl = $('#bClearKeys');
-      if (countEl) countEl.textContent = `[+] Đã lưu ${count}/10 Key API`;
+      if (countEl) countEl.textContent = `[+] Đã lưu ${count}/121 Key API`;
       if (clearEl) clearEl.style.display = count > 0 ? 'inline-block' : 'none';
       updateEngineStatus();
     }
@@ -7320,8 +7385,8 @@ XÁC NHẬN: Bạn đã hiểu rõ toàn bộ vai trò và quy tắc THPT trên 
         triggerDuplicateKeyAlert(key);
         return;
       }
-      if (STATE.userKeyPool.length >= 10) {
-        $('#keySt').innerHTML = '<div class="api-st err">⚠️ Đã đạt tối đa 10/10 Key API!</div>';
+      if (STATE.userKeyPool.length >= 121) {
+        $('#keySt').innerHTML = '<div class="api-st err">⚠️ Đã đạt tối đa 121/121 Key API!</div>';
         return;
       }
 
@@ -7334,8 +7399,8 @@ XÁC NHẬN: Bạn đã hiểu rõ toàn bộ vai trò và quy tắc THPT trên 
       const count = STATE.userKeyPool.length;
       updateKeyPoolUI();
       updateApiHealthBar(true);
-      $('#keySt').innerHTML = `<div class="api-st ok" style="color:#10b981">✨ [+] Đã lưu ${count}/10 Key API (Key #${count} đã kích hoạt)</div>`;
-      log('KEY', `[+] Đã lưu thành công Key API #${count}/10 vào danh sách xoay vòng tự động!`);
+      $('#keySt').innerHTML = `<div class="api-st ok" style="color:#10b981">✨ [+] Đã lưu ${count}/121 Key API (Key #${count} đã kích hoạt)</div>`;
+      log('KEY', `[+] Đã lưu thành công Key API #${count}/121 vào danh sách xoay vòng tự động!`);
     });
 
     $('#bClearKeys')?.addEventListener('click', () => {
@@ -7559,6 +7624,11 @@ XÁC NHẬN: Bạn đã hiểu rõ toàn bộ vai trò và quy tắc THPT trên 
         STATE.bridgeConnected = true;
         const liveEl = $('#bridgeLiveSt');
         if (liveEl) liveEl.innerHTML = '<span style="color:#10b981">🟢 Bridge: Đã kết nối với Tab Gemini (Chống đơ nền)</span>';
+      } else if (e.data && e.data.type === 'EDUNEXT_BRIDGE_CLOSED') {
+        STATE.bridgeConnected = false;
+        STATE.lastBridgePong = 0;
+        const liveEl = $('#bridgeLiveSt');
+        if (liveEl) liveEl.innerHTML = '<span style="color:#f59e0b">⚪ Bridge: Tab Gemini chưa mở hoặc chưa hoạt động</span>';
       }
     });
 
@@ -7571,6 +7641,11 @@ XÁC NHẬN: Bạn đã hiểu rõ toàn bộ vai trò và quy tắc THPT trên 
             STATE.bridgeConnected = true;
             const liveEl = $('#bridgeLiveSt');
             if (liveEl) liveEl.innerHTML = '<span style="color:#10b981">🟢 Bridge: Đã kết nối với Tab Gemini (Chống đơ nền)</span>';
+          } else if (e.data && e.data.type === 'EDUNEXT_BRIDGE_CLOSED') {
+            STATE.bridgeConnected = false;
+            STATE.lastBridgePong = 0;
+            const liveEl = $('#bridgeLiveSt');
+            if (liveEl) liveEl.innerHTML = '<span style="color:#f59e0b">⚪ Bridge: Tab Gemini chưa mở hoặc chưa hoạt động</span>';
           }
         });
       }
@@ -7578,11 +7653,24 @@ XÁC NHẬN: Bạn đã hiểu rõ toàn bộ vai trò và quy tắc THPT trên 
 
     try {
       if (typeof GM_addValueChangeListener === 'function') {
-        GM_addValueChangeListener('EDUNEXT_BRIDGE_HEARTBEAT', () => {
+        GM_addValueChangeListener('EDUNEXT_BRIDGE_HEARTBEAT', (name, oldVal, newVal) => {
+          if (!newVal || newVal === 0) {
+            STATE.bridgeConnected = false;
+            STATE.lastBridgePong = 0;
+            const liveEl = $('#bridgeLiveSt');
+            if (liveEl) liveEl.innerHTML = '<span style="color:#f59e0b">⚪ Bridge: Tab Gemini chưa mở hoặc chưa hoạt động</span>';
+            return;
+          }
           STATE.lastBridgePong = Date.now();
           STATE.bridgeConnected = true;
           const liveEl = $('#bridgeLiveSt');
           if (liveEl) liveEl.innerHTML = '<span style="color:#10b981">🟢 Bridge: Đã kết nối với Tab Gemini (Chống đơ nền)</span>';
+        });
+        GM_addValueChangeListener('EDUNEXT_BRIDGE_CLOSED', () => {
+          STATE.bridgeConnected = false;
+          STATE.lastBridgePong = 0;
+          const liveEl = $('#bridgeLiveSt');
+          if (liveEl) liveEl.innerHTML = '<span style="color:#f59e0b">⚪ Bridge: Tab Gemini chưa mở hoặc chưa hoạt động</span>';
         });
       }
     } catch (_) {}
@@ -7603,12 +7691,18 @@ XÁC NHẬN: Bạn đã hiểu rõ toàn bộ vai trò và quy tắc THPT trên 
           }
         } catch (_) {}
 
-        const hb = Math.max(GM_getValue('EDUNEXT_BRIDGE_HEARTBEAT', 0), STATE.lastBridgePong || 0);
-        const alive = (Date.now() - hb) < 25000;
-        STATE.bridgeConnected = alive;
+        const hbVal = GM_getValue('EDUNEXT_BRIDGE_HEARTBEAT', 0);
+        if (!hbVal || hbVal === 0) {
+          STATE.bridgeConnected = false;
+          STATE.lastBridgePong = 0;
+        } else {
+          const hb = Math.max(hbVal, STATE.lastBridgePong || 0);
+          const alive = (Date.now() - hb) < 3500;
+          STATE.bridgeConnected = alive;
+        }
         const liveEl = $('#bridgeLiveSt');
         if (liveEl) {
-          if (alive) {
+          if (STATE.bridgeConnected) {
             liveEl.innerHTML = '<span style="color:#10b981">🟢 Bridge: Đã kết nối với Tab Gemini (Chống đơ nền)</span>';
           } else {
             liveEl.innerHTML = '<span style="color:#f59e0b">⚪ Bridge: Tab Gemini chưa mở hoặc chưa hoạt động</span>';
@@ -7616,7 +7710,7 @@ XÁC NHẬN: Bạn đã hiểu rõ toàn bộ vai trò và quy tắc THPT trên 
         }
       } catch (_) {}
     }
-    setInterval(checkBridgeHeartbeat, 2500);
+    setInterval(checkBridgeHeartbeat, 1500);
 
     const imgBadge = $('#imgPreviewBadge');
     const lightbox = $('#imgLightbox');
@@ -7848,11 +7942,11 @@ XÁC NHẬN: Bạn đã hiểu rõ toàn bộ vai trò và quy tắc THPT trên 
 
       if (inputVal && !STATE.userKeyPool.includes(inputVal)) {
         const inputResult = scanResults.find(r => r.key.endsWith(inputVal.slice(-4)));
-        if (inputResult && inputResult.status === 'VALID' && STATE.userKeyPool.length < 10) {
+        if (inputResult && inputResult.status === 'VALID' && STATE.userKeyPool.length < 121) {
           STATE.userKeyPool.push(inputVal);
           saveUserKeyPool(STATE.userKeyPool);
           if ($('#keyIn')) $('#keyIn').value = '';
-          log('KEY', `[+] Tự động lưu Key hợp lệ từ ô nhập vào slot #${STATE.userKeyPool.length}/10`);
+          log('KEY', `[+] Tự động lưu Key hợp lệ từ ô nhập vào slot #${STATE.userKeyPool.length}/121`);
         }
       }
 
@@ -8543,7 +8637,7 @@ body {
         try {
           const sysCount = BUILTIN_KEYS.length;
           const userCount = STATE.userKeyPool.length;
-          log('KEY', `Plug & Play: ✔ (Hệ thống sẵn có ${sysCount} Key VIP + ${userCount}/10 Key cá nhân)`);
+          log('KEY', `Plug & Play: ✔ (Hệ thống sẵn có ${sysCount} Key VIP + ${userCount}/121 Key cá nhân)`);
           for (let idx = 0; idx < Math.min(3, sysCount); idx++) {
             const k = BUILTIN_KEYS[idx];
             const p = detectKeyProvider(k);
