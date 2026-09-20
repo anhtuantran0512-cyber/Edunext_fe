@@ -2507,7 +2507,29 @@
       return Math.max(0, score);
     },
 
+    isSameQuestion(textA, textB) {
+      if (!textA || !textB) return false;
+      const clean = s => s.toLowerCase().replace(/[\s\W_]+/g, ' ').trim();
+      const a = clean(textA);
+      const b = clean(textB);
+      if (a === b) return true;
+      if (a.length > 25 && b.length > 25) {
+        const subA = a.substring(0, 75);
+        const subB = b.substring(0, 75);
+        if (subA === subB || a.includes(subB) || b.includes(subA)) return true;
+      }
+      return false;
+    },
+
     findActiveQuestion() {
+      const allMsgs = this.getChatMessages();
+      if (allMsgs && allMsgs.length > 0) {
+        const lastMsg = allMsgs[allMsgs.length - 1];
+        if (lastMsg && lastMsg.role === 'user') {
+          return null;
+        }
+      }
+
       const turnMsgs = this.getCurrentTurnAssistantMessages();
       if (turnMsgs.length > 0) {
         const turnLastMsg = turnMsgs[turnMsgs.length - 1];
@@ -2516,7 +2538,6 @@
         let cleanTurnText = turnTexts.join('\n\n');
 
         if (/^(?:x\s*[\.\,\:]?|\([0-9\w\-\+\/]+\)\s*bằng|trong\s*(?:hai|các)\s*hàm|hàm\s*này\s*(?:có)?)/i.test(cleanTurnText)) {
-          const allMsgs = this.getChatMessages();
           for (let j = allMsgs.length - 1 - turnMsgs.length; j >= Math.max(0, allMsgs.length - 12); j--) {
             const prevMsg = allMsgs[j];
             if (prevMsg && prevMsg.role === 'assistant') {
@@ -2564,6 +2585,10 @@
             };
           }
         }
+      }
+
+      if (allMsgs && allMsgs.length > 0) {
+        return null;
       }
 
       const universalSelectors = [
@@ -2727,12 +2752,20 @@
         const qEl = candidate.element;
         const qText = candidate.text;
 
-        if (qEl && qEl.dataset.edunextAnswered === 'true' && STATE.fsmState !== FSM_STATE.SOLVING) {
-          if (STATE.lastAnsweredQuestionText && qText === STATE.lastAnsweredQuestionText) return;
-          delete qEl.dataset.edunextAnswered;
+        const timeSinceSubmit = Date.now() - (STATE.lastSubmitTimestamp || 0);
+        if (timeSinceSubmit < 4000) {
+          return;
         }
 
-        if (STATE.lastAnsweredQuestionText && qText === STATE.lastAnsweredQuestionText && STATE.fsmState !== FSM_STATE.SOLVING) {
+        const isAlreadyAnswered = this.isSameQuestion(qText, STATE.lastAnsweredQuestionText) ||
+                                  this.isSameQuestion(qText, STATE.lastAnsweredCandidateText) ||
+                                  (qEl && qEl.dataset.edunextAnswered === 'true');
+
+        if (isAlreadyAnswered && STATE.fsmState !== FSM_STATE.SOLVING && (!candidate.feedback || !candidate.feedback.hasFeedback)) {
+          return;
+        }
+
+        if (STATE.fsmState === FSM_STATE.EVALUATING && isAlreadyAnswered) {
           return;
         }
 
@@ -2753,14 +2786,14 @@
           STATE.evaluationTimer = null;
         }
 
-        if (STATE.lastAnsweredQuestionText && qText !== STATE.lastAnsweredQuestionText) {
+        if (STATE.lastAnsweredQuestionText && !this.isSameQuestion(qText, STATE.lastAnsweredQuestionText)) {
           STATE.wrongAnswers = [];
           STATE.forbidNumericalAnswers = false;
         }
 
         log('DETECT', `🎯 PHÁT HIỆN CÂU HỎI MỚI [Nguồn: ${candidate.source}]: "${qText.substring(0, 70)}..."`);
         STATE.activeQuestionCandidate = candidate;
-        if (STATE.autoSolve && (STATE.fsmState === FSM_STATE.IDLE || STATE.fsmState === FSM_STATE.EVALUATING)) {
+        if (STATE.autoSolve && STATE.fsmState === FSM_STATE.IDLE) {
           STATE.retryCount = 0;
           STATE.wrongAnswers = [];
           STATE.forbidNumericalAnswers = false;
@@ -4010,12 +4043,11 @@ LỊCH SỬ CÁC CÂU HỎI VỪA HOÀN THÀNH TRONG BÀI HỌC (tham khảo ti�
           p += `💡 GỢI Ý & CHỈ DẪN CÂU HỎI (Bám sát để trả lời chính xác):\n${effectiveHint}\n\n`;
         }
         if (qd.bottomContext && qd.bottomContext.length > 5) {
-          const cleanBtm = qd.bottomContext.replace(/data:image\/[a-zA-Z0-9+\-\.]+;base64,[A-Za-z0-9+/=]+/g, '').replace(/!\[.*?\]\([^\)]+\)/g, '');
           p += `Dữ kiện bổ sung: ${cleanBtm.substring(0, 3000)}\n\n`;
         }
-        p += `👉 Tiếp tục làm bài theo các quy tắc THPT chuẩn đã thiết lập (Phong cách /human thuần túy, tuyệt đối KHÔNG markdown, KHÔNG latex, KHÔNG ký tự $, định dạng "Trả lời: <đáp án>").`;
       }
-      return p + _0xCANARY;
+      const personaPrefix = `Bạn là một học sinh THPT giỏi theo chương trình SGK mới của Bộ GD&ĐT Việt Nam (Kết nối tri thức, Cánh diều). Phong cách trả lời /human: Tự nhiên, ngắn gọn, gãy gọn, 100% tiếng Việt thuần túy, tuyệt đối KHÔNG markdown (**in đậm**, *nghiêng*), KHÔNG latex, KHÔNG dùng $, bắt buộc xuất: "Trả lời: <đáp án>".\n\n`;
+      return personaPrefix + p + _0xCANARY;
     },
 
     async solve(qd) {
@@ -4711,19 +4743,6 @@ XÁC NHẬN: Bạn đã hiểu rõ toàn bộ vai trò và quy tắc THPT trên 
     },
 
     async solveViaBridge(qd) {
-      if (!STATE.bridgePrimed) {
-        log('BRIDGE', '🎭 [KHỞI TẠO VAI TRÒ]: Bắt đầu gửi Prompt Vai Trò Học Sinh THPT Chuẩn sang Gemini...');
-        const primerPrompt = this.buildGeminiRolePrimerPrompt();
-        const primerResp = await this.executeBridgeTurn(primerPrompt, null, 'PRIMER', 20000);
-        if (primerResp) {
-          STATE.bridgePrimed = true;
-          log('BRIDGE', `✅ [VAI TRÒ THIẾT LẬP]: Gemini đã tiếp nhận vai trò! ("${primerResp.substring(0, 60)}...")`);
-          await sleep(600);
-        } else {
-          log('BRIDGE', '⚠️ Gemini chưa phản hồi lượt khởi tạo vai trò, tiếp tục gửi đề bài...', 'warn');
-        }
-      }
-
       STATE.bridgeSessionPromptCount = (STATE.bridgeSessionPromptCount || 0) + 1;
       const promptText = this.buildCondensedBridgePrompt(qd);
       const img = qd.images?.[0] || null;
@@ -5056,6 +5075,8 @@ XÁC NHẬN: Bạn đã hiểu rõ toàn bộ vai trò và quy tắc THPT trên 
         STATE.currentQuestionTurnElement.dataset.edunextAnswered = 'true';
       }
       STATE.lastAnsweredQuestionText = STATE.currentQuestion?.text || '';
+      STATE.lastAnsweredCandidateText = STATE.activeQuestionCandidate?.text || STATE.currentQuestion?.text || '';
+      STATE.lastSubmitTimestamp = Date.now();
 
       STATE.conversationHistory.push({
         question: STATE.currentQuestion?.text || '',
@@ -5326,6 +5347,9 @@ XÁC NHẬN: Bạn đã hiểu rõ toàn bộ vai trò và quy tắc THPT trên 
       } catch (_) {}
     }, 1500);
     try { GM_setValue('EDUNEXT_BRIDGE_HEARTBEAT', Date.now()); } catch (_) {}
+    let lastProcessedPrompt = '';
+    let lastGeneratedResponse = '';
+    let lastPromptTimestamp = 0;
 
     const badge = document.createElement('div');
     badge.id = 'edunext-gemini-bridge-badge';
@@ -5851,16 +5875,18 @@ XÁC NHẬN: Bạn đã hiểu rõ toàn bộ vai trò và quy tắc THPT trên 
         }
 
         if (!stopBtn && !isStreaming) {
-          const isNewResponse = resps.length > baselineCount || (curText.length > 15 && curText !== baselineText);
+          const isNewResponse = resps.length > baselineCount || (hasStarted && curText.length > 5 && curText !== baselineText);
           if (hasStarted || isNewResponse) {
-            if (hasActionButtons && curText.length > 10) {
+            if (hasActionButtons && curText.length > 10 && curText !== baselineText) {
               reportStatus(reqId, 'DONE', 'Đã thu thập đáp án hoàn chỉnh!');
               return curText;
             }
 
-            if (curText && curText.length > 5 && curText === lastText) {
+            if (curText && curText.length > 5 && curText === lastText && curText !== baselineText) {
               stable++;
-              if (stable >= 3) {
+              const hasAnswerPrefix = /Trả\s*lời\s*:/i.test(curText);
+              const minStable = hasAnswerPrefix ? 3 : 5;
+              if (stable >= minStable) {
                 reportStatus(reqId, 'DONE', 'Đã thu thập đáp án hoàn chỉnh!');
                 return curText;
               }
@@ -5874,7 +5900,7 @@ XÁC NHẬN: Bạn đã hiểu rõ toàn bộ vai trò và quy tắc THPT trên 
           stable = 0;
         }
       }
-      return lastText || null;
+      return (lastText && lastText !== baselineText) ? lastText : null;
     }
 
     async function handleIncomingRequest(req) {
@@ -5887,6 +5913,17 @@ XÁC NHẬN: Bạn đã hiểu rõ toàn bộ vai trò và quy tắc THPT trên 
       if (!req || !req.id || !req.prompt) return;
       if (req.id === lastProcessedReqId) return;
       lastProcessedReqId = req.id;
+
+      if (req.prompt && lastGeneratedResponse && (Date.now() - lastPromptTimestamp < 25000)) {
+        const normA = req.prompt.toLowerCase().replace(/[\s\W_]+/g, ' ').trim();
+        const normB = lastProcessedPrompt.toLowerCase().replace(/[\s\W_]+/g, ' ').trim();
+        if (normA === normB || (normA.length > 30 && normB.length > 30 && (normA.includes(normB) || normB.includes(normA)))) {
+          console.log('[EduNext Bridge] Đã có đáp án trong bộ nhớ đệm 25s! Gửi lại ngay:', lastGeneratedResponse.substring(0, 60));
+          reportStatus(req.id, 'FINISHED', 'Trả về kết quả từ bộ nhớ đệm chống spam...');
+          sendResponse(req.id, lastGeneratedResponse);
+          return;
+        }
+      }
 
       try {
         console.log(`[EduNext Bridge] Nhận câu hỏi: ${req.id.substring(0, 8)}... (Ảnh: ${!!req.imageBase64})`);
@@ -5969,6 +6006,11 @@ XÁC NHẬN: Bạn đã hiểu rõ toàn bộ vai trò và quy tắc THPT trên 
         updateGeminiTabTitle('[✅ Đã chuyển đáp án!]');
         reportStatus(req.id, 'FINISHED', 'Đã chuyển đáp án hoàn chỉnh về EduNext!');
         sendResponse(req.id, response);
+        if (response && response.length > 5) {
+          lastProcessedPrompt = req.prompt;
+          lastGeneratedResponse = response;
+          lastPromptTimestamp = Date.now();
+        }
         try {
           if (typeof GM_setClipboard === 'function' && response) {
             GM_setClipboard(`Câu hỏi: ${req.prompt}\n\nĐáp án: ${response}`);
