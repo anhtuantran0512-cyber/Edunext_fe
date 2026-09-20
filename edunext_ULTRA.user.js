@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         EdUnExT_ULTRA
 // @namespace    https://edunext.fpt.edu.vn/
-// @version      2.2.2
+// @version      2.2.3
 // @description  AUTO Giải edunext bản prenium
 // @author       BroAmStuck Studio
 // @updateURL    https://raw.githubusercontent.com/anhtuantran0512-cyber/Edunext_fe/main/edunext_ULTRA.user.js
@@ -2959,21 +2959,72 @@
     },
 
     checkLessonCompletion() {
-      const msgs = this.getChatMessages();
-      if (!msgs || msgs.length === 0) return null;
-      const recent = msgs.filter(m => m.role === 'assistant').slice(-4);
-      for (const m of recent) {
-        const t = m.text || '';
-        if (/chúc\s*mừng\s*em\s*hoàn\s*thành\s*buổi\s*học|hoàn\s*thành\s*buổi\s*học|hẹn\s*gặp\s*em\s*ở\s*buổi\s*học\s*tiếp\s*theo|điểm\s*buổi\s*học\s*:\s*\d+\s*\/\s*100|hoàn\s*thành\s*bài\s*học|kỷ\s*lục\s*chuỗi\s*đúng\s*liên\s*tiếp|buổi\s*học\s*kết\s*thúc/i.test(t)) {
-          return { completed: true, text: t, element: m.element };
+      try {
+        const modalSelectors = [
+          '.ant-modal-content', '.ant-modal-body', '[role="dialog"]',
+          '.ant-modal', '.swal2-modal', '.modal-content',
+          '[class*="congrats-modal"]', '[class*="complete-modal"]', '[class*="finish-modal"]'
+        ];
+        for (const sel of modalSelectors) {
+          const modalEls = document.querySelectorAll(sel);
+          for (const mEl of modalEls) {
+            if (mEl.closest && (mEl.closest('.di-c') || mEl.closest('#broamstuck-di-root'))) continue;
+            if (mEl.offsetParent === null && !mEl.offsetHeight) continue;
+            const raw = mEl.textContent || '';
+            if (/chúc\s*mừng|hoàn\s*thành\s*(?:buổi|bài|khóa)\s*học|congratulations|kết\s*thúc\s*(?:buổi|bài)\s*học|kỷ\s*lục\s*chuỗi\s*đúng|điểm\s*(?:buổi|bài)\s*học\s*:\s*\d+|100\s*%/i.test(raw)) {
+              return { completed: true, type: 'modal', element: mEl, text: raw };
+            }
+          }
         }
+        const progEls = document.querySelectorAll('.ant-progress-status-success, [aria-valuenow="100"], .ant-progress-text');
+        for (const pEl of progEls) {
+          if (pEl.offsetParent === null && !pEl.offsetHeight) continue;
+          const t = pEl.textContent || '';
+          if (t.includes('100%') || pEl.classList.contains('ant-progress-status-success')) {
+            const wrap = pEl.closest('.w-lesson-item--active, .lesson-header, .lesson-progress');
+            if (wrap) {
+              return { completed: true, type: 'progress', element: pEl, text: 'Tiến độ hoàn thành 100%' };
+            }
+          }
+        }
+        const msgs = this.getChatMessages();
+        if (msgs && msgs.length > 0) {
+          const recent = msgs.filter(m => m.role === 'assistant').slice(-4);
+          for (const m of recent) {
+            const t = m.text || '';
+            if (/chúc\s*mừng\s*(?:em\s*)?hoàn\s*thành\s*buổi\s*học|hoàn\s*thành\s*buổi\s*học|hẹn\s*gặp\s*(?:em\s*)?ở\s*buổi\s*học\s*tiếp\s*theo|điểm\s*buổi\s*học\s*:\s*\d+\s*\/\s*100|hoàn\s*thành\s*bài\s*học|kỷ\s*lục\s*chuỗi\s*đúng\s*liên\s*tiếp|buổi\s*học\s*kết\s*thúc/i.test(t)) {
+              return { completed: true, type: 'chat', text: t, element: m.element };
+            }
+          }
+        }
+        return null;
+      } catch (_) {
+        return null;
       }
-      return null;
     },
 
     async navigateToNextLesson() {
       log('SYS', '🚀 Bắt đầu tiến trình tự động tìm và chuyển bài học mới...');
-      
+      try {
+        const modalSelectors = ['.ant-modal-content', '.ant-modal', '[role="dialog"]', '.modal-content', '.swal2-modal'];
+        for (const sel of modalSelectors) {
+          const mEl = document.querySelector(sel);
+          if (mEl && (mEl.offsetParent !== null || mEl.offsetHeight > 0)) {
+            const modalBtns = Array.from(mEl.querySelectorAll('button, a, [role="button"], .ant-btn'));
+            const targetBtn = modalBtns.find(b => {
+              if (b.disabled) return false;
+              const t = sanitizeText(b.textContent || '').toLowerCase();
+              return /tiếp\s*tục|bài\s*tiếp|tiếp\s*theo|học\s*tiếp|hoàn\s*thành|xác\s*nhận|đồng\s*ý|đóng|continue|next|ok|close/i.test(t);
+            });
+            if (targetBtn) {
+              log('SYS', `🚀 Tự động click nút trong Modal chúc mừng: "${sanitizeText(targetBtn.textContent || '')}"`);
+              targetBtn.click();
+              await sleep(1500);
+            }
+          }
+        }
+      } catch (_) {}
+
       const cards = Array.from(document.querySelectorAll(CONFIG.SELECTORS.LESSON_ITEM));
       if (cards.length > 0) {
         let activeIdx = cards.findIndex(c => c.classList.contains('w-lesson-item--active') || c.classList.contains('active') || c.getAttribute('aria-selected') === 'true');
@@ -3008,6 +3059,7 @@
       const inlineBtns = Array.from(document.querySelectorAll('button, a, div[role="button"]'));
       for (const btn of inlineBtns) {
         if (btn.offsetParent === null || btn.disabled) continue;
+        if (btn.closest && (btn.closest('.di-c') || btn.closest('#broamstuck-di-root'))) continue;
         const t = sanitizeText(btn.textContent || '').toLowerCase();
         if (/^(?:học\s*)?bài\s*(?:học\s*)?tiếp\s*(?:theo)?$|buổi\s*học\s*tiếp\s*(?:theo)?|tiếp\s*tục\s*học|next\s*(?:lesson|activity)/i.test(t)) {
           log('SYS', `🚀 Click nút inline: "${t}"`);
@@ -3050,14 +3102,14 @@
       STATE.activeQuestionCandidate = null;
       STATE.lastAnsweredQuestionText = '';
 
-      await sleep(2500);
+      await sleep(3000);
 
       const startBtn = document.querySelector(CONFIG.SELECTORS.START_PROMPT_BTN) ||
                        Array.from(document.querySelectorAll('button')).find(b => b.offsetParent !== null && !b.disabled && /bắt\s*đầu|sẵn\s*sàng/i.test(b.textContent || ''));
       if (startBtn && startBtn.offsetParent !== null && !startBtn.disabled) {
         log('VISION', '🚀 Tự động kích hoạt nút Bắt đầu / Sẵn sàng bài học mới!');
         startBtn.click();
-        await sleep(1200);
+        await sleep(1500);
       }
       this.checkForNewContent();
     },
@@ -3238,17 +3290,19 @@
     },
 
     extractSubImageText(container) {
-      if (!container) return '';
+      const root = container || document.body;
+      if (!root) return '';
       try {
-        const mediaEls = container.querySelectorAll('img, svg:not(.anticon svg), canvas');
+        const mediaEls = root.querySelectorAll('img, svg:not(.anticon svg), canvas');
         if (mediaEls.length === 0) return '';
         const collected = [];
         for (const media of mediaEls) {
+          if (media.closest && (media.closest('.di-c') || media.closest('#broamstuck-di-root'))) continue;
           let sib = media.nextElementSibling;
           let depth = 0;
-          while (sib && depth < 6) {
+          while (sib && depth < 8) {
             const t = sanitizeText(sib.textContent || '');
-            if (t.length > 15 && !/^[0-9a-f]{24}/i.test(t)) {
+            if (t.length > 12 && !/^[0-9a-f]{24}/i.test(t)) {
               if (!collected.some(c => c.includes(t) || t.includes(c))) {
                 collected.push(t);
               }
@@ -3256,12 +3310,12 @@
             sib = sib.nextElementSibling;
             depth++;
           }
-          if (media.parentElement && media.parentElement !== container) {
+          if (media.parentElement && media.parentElement !== root) {
             let pSib = media.parentElement.nextElementSibling;
             let pDepth = 0;
-            while (pSib && pDepth < 6) {
+            while (pSib && pDepth < 8) {
               const t = sanitizeText(pSib.textContent || '');
-              if (t.length > 15 && !/^[0-9a-f]{24}/i.test(t)) {
+              if (t.length > 12 && !/^[0-9a-f]{24}/i.test(t)) {
                 if (!collected.some(c => c.includes(t) || t.includes(c))) {
                   collected.push(t);
                 }
@@ -3269,11 +3323,203 @@
               pSib = pSib.nextElementSibling;
               pDepth++;
             }
+            if (media.parentElement.parentElement && media.parentElement.parentElement !== root) {
+              let gpSib = media.parentElement.parentElement.nextElementSibling;
+              let gpDepth = 0;
+              while (gpSib && gpDepth < 6) {
+                const t = sanitizeText(gpSib.textContent || '');
+                if (t.length > 12 && !/^[0-9a-f]{24}/i.test(t)) {
+                  if (!collected.some(c => c.includes(t) || t.includes(c))) {
+                    collected.push(t);
+                  }
+                }
+                gpSib = gpSib.nextElementSibling;
+                gpDepth++;
+              }
+            }
+          }
+        }
+        const captionSelectors = ['figcaption', '.caption', '[class*="caption"]', '[class*="under-image"]', '[class*="sub-image"]', '[class*="image-desc"]', '[class*="image-footer"]'];
+        for (const sel of captionSelectors) {
+          const caps = root.querySelectorAll(sel);
+          for (const cap of caps) {
+            if (cap.closest && (cap.closest('.di-c') || cap.closest('#broamstuck-di-root'))) continue;
+            const t = sanitizeText(cap.textContent || '');
+            if (t.length > 12 && !collected.some(c => c.includes(t) || t.includes(c))) {
+              collected.push(t);
+            }
           }
         }
         return collected.join('\n\n');
       } catch (_) {
         return '';
+      }
+    },
+
+    scanSubChatboxText(container) {
+      if (!container) return '';
+      try {
+        const collected = [];
+        let sib = container.nextElementSibling;
+        let depth = 0;
+        while (sib && depth < 6) {
+          if (sib.closest && (sib.closest('.di-c') || sib.closest('#broamstuck-di-root'))) {
+            sib = sib.nextElementSibling;
+            depth++;
+            continue;
+          }
+          const raw = sib.textContent || '';
+          const t = this.extractCleanText(sib, raw);
+          if (t.length >= 10 && !/^[0-9a-f]{24}/i.test(t) && !/Enter để gửi|Shift\+Enter/i.test(t)) {
+            const score = this.calculateQuestionScore(sib, t);
+            if (score >= 20 || /\?|\b(câu|bài|tính|tìm|chọn|đáp án|hãy|cho biết)\b/i.test(t)) {
+              if (!collected.some(c => c.includes(t) || t.includes(c))) {
+                collected.push(t);
+              }
+            }
+          }
+          sib = sib.nextElementSibling;
+          depth++;
+        }
+        if (container.parentElement && container.parentElement !== document.body) {
+          let pSib = container.parentElement.nextElementSibling;
+          let pDepth = 0;
+          while (pSib && pDepth < 5) {
+            if (pSib.closest && (pSib.closest('.di-c') || pSib.closest('#broamstuck-di-root'))) {
+              pSib = pSib.nextElementSibling;
+              pDepth++;
+              continue;
+            }
+            const raw = pSib.textContent || '';
+            const t = this.extractCleanText(pSib, raw);
+            if (t.length >= 10 && !/^[0-9a-f]{24}/i.test(t) && !/Enter để gửi|Shift\+Enter/i.test(t)) {
+              const score = this.calculateQuestionScore(pSib, t);
+              if (score >= 20 || /\?|\b(câu|bài|tính|tìm|chọn|đáp án|hãy|cho biết)\b/i.test(t)) {
+                if (!collected.some(c => c.includes(t) || t.includes(c))) {
+                  collected.push(t);
+                }
+              }
+            }
+            pSib = pSib.nextElementSibling;
+            pDepth++;
+          }
+        }
+        const footnoteSelectors = ['.chat-footnote', '[class*="footnote"]', '[class*="subtext"]', '[class*="sub-message"]', '.chat-footer-meta', '[class*="chat-bottom"]'];
+        for (const sel of footnoteSelectors) {
+          const els = document.querySelectorAll(sel);
+          for (const el of els) {
+            if (el.closest && (el.closest('.di-c') || el.closest('#broamstuck-di-root'))) continue;
+            const t = this.extractCleanText(el, el.textContent || '');
+            if (t.length >= 10 && !collected.some(c => c.includes(t) || t.includes(c))) {
+              const score = this.calculateQuestionScore(el, t);
+              if (score >= 20) collected.push(t);
+            }
+          }
+        }
+        return collected.join('\n\n');
+      } catch (_) {
+        return '';
+      }
+    },
+
+    scanRoundChatbox() {
+      try {
+        const roundSelectors = [
+          '[class*="round"]', '[class*="circle"]', '[class*="avatar"]',
+          '[class*="bubble-round"]', '[class*="round-bubble"]', '[class*="avatar-bubble"]',
+          '.character-bubble', '.bot-circle-box', '.ant-avatar',
+          '[style*="border-radius: 50%"]', '[style*="border-radius:50%"]',
+          '[style*="border-radius: 9999px"]', '[style*="border-radius:9999px"]'
+        ];
+        let bestCandidate = null;
+        let bestScore = 0;
+        for (const sel of roundSelectors) {
+          let elements = [];
+          try { elements = Array.from(document.querySelectorAll(sel)); } catch (_) {}
+          for (const el of elements) {
+            if (!el || !el.isConnected) continue;
+            if (el.closest && (el.closest('.di-c') || el.closest('#broamstuck-di-root'))) continue;
+            if (el.offsetParent === null && !el.offsetHeight && !el.offsetWidth) continue;
+            let targets = [el];
+            if (el.nextElementSibling) targets.push(el.nextElementSibling);
+            if (el.parentElement) {
+              targets.push(el.parentElement);
+              if (el.parentElement.nextElementSibling) targets.push(el.parentElement.nextElementSibling);
+            }
+            for (const tEl of targets) {
+              if (!tEl || !tEl.isConnected) continue;
+              if (tEl.closest && (tEl.closest('.di-c') || tEl.closest('#broamstuck-di-root'))) continue;
+              const raw = tEl.textContent || '';
+              if (raw.length < 10) continue;
+              const cleanText = this.extractCleanText(tEl, raw);
+              if (cleanText.length < 10) continue;
+              let score = this.calculateQuestionScore(tEl, cleanText);
+              score += 15;
+              if (score > bestScore && score >= 30) {
+                bestScore = score;
+                bestCandidate = {
+                  type: 'question',
+                  source: 'round_chatbox',
+                  text: cleanText,
+                  questionText: cleanText,
+                  element: tEl,
+                  turnMsgs: [{ element: tEl, text: cleanText, role: 'assistant' }],
+                  score: score
+                };
+              }
+            }
+          }
+        }
+        return bestCandidate;
+      } catch (_) {
+        return null;
+      }
+    },
+
+    scanStandalonePlainText() {
+      try {
+        const textSelectors = [
+          '.ant-tabs-tabpane-active p', '.ant-tabs-tabpane-active div',
+          '.main-content p', '.main-content div', '.content-wrapper p', '.content-wrapper div',
+          'article p', 'article div', 'section p', 'section div',
+          '[class*="lesson-content"] p', '[class*="lesson-content"] div',
+          '[class*="reading"] p', '[class*="reading"] div',
+          '[class*="task-body"]', '[class*="problem-statement"]',
+          '.ant-typography', 'blockquote', '.rendered-markdown p'
+        ];
+        let bestCandidate = null;
+        let bestScore = 0;
+        for (const sel of textSelectors) {
+          let elements = [];
+          try { elements = Array.from(document.querySelectorAll(sel)); } catch (_) {}
+          for (const el of elements) {
+            if (!el || !el.isConnected) continue;
+            if (el.closest && (el.closest('.di-c') || el.closest('#broamstuck-di-root') || el.closest('header') || el.closest('nav') || el.closest('.ant-layout-header'))) continue;
+            if (el.offsetParent === null && !el.offsetHeight && !el.offsetWidth) continue;
+            const input = reactDispatcher.findChatInput ? reactDispatcher.findChatInput() : null;
+            if (input && el.contains(input)) continue;
+            const raw = el.textContent || '';
+            if (raw.length < 15 || raw.length > 3500) continue;
+            const cleanText = this.extractCleanText(el, raw);
+            if (cleanText.length < 15) continue;
+            const score = this.calculateQuestionScore(el, cleanText);
+            if (score > bestScore && score >= 35) {
+              bestScore = score;
+              bestCandidate = {
+                type: 'question',
+                source: 'standalone_plaintext',
+                text: cleanText,
+                questionText: cleanText,
+                element: el,
+                turnMsgs: [{ element: el, text: cleanText, role: 'assistant' }],
+                score: score
+              };
+            }
+          }
+        }
+        return bestCandidate;
+      } catch (_) {
+        return null;
       }
     },
 
@@ -3492,6 +3738,16 @@
         const turnTexts = turnMsgs.map(m => this.extractCleanText(m.element, m.text)).filter(t => t && t.length > 0);
         let cleanTurnText = turnTexts.join('\n\n');
 
+        const subChatText = this.scanSubChatboxText(turnLastEl);
+        if (subChatText && subChatText.length >= 10 && !cleanTurnText.includes(subChatText)) {
+          cleanTurnText = cleanTurnText ? (cleanTurnText + '\n\n' + subChatText) : subChatText;
+        }
+
+        const subImgText = this.extractSubImageText(turnLastEl);
+        if (subImgText && subImgText.length >= 10 && !cleanTurnText.includes(subImgText)) {
+          cleanTurnText = cleanTurnText ? (cleanTurnText + '\n\n' + subImgText) : subImgText;
+        }
+
         if (/^(?:x\s*[\.\,\:]?|\([0-9\w\-\+\/]+\)\s*bằng|trong\s*(?:hai|các)\s*hàm|hàm\s*này\s*(?:có)?)/i.test(cleanTurnText)) {
           for (let j = allMsgs.length - 1 - turnMsgs.length; j >= Math.max(0, allMsgs.length - 12); j--) {
             const prevMsg = allMsgs[j];
@@ -3540,6 +3796,11 @@
             };
           }
         }
+      }
+
+      const roundCandidate = this.scanRoundChatbox();
+      if (roundCandidate) {
+        return roundCandidate;
       }
 
       const universalSelectors = [
@@ -3612,6 +3873,27 @@
 
       if (bestCandidate) {
         return bestCandidate;
+      }
+
+      const standaloneCandidate = this.scanStandalonePlainText();
+      if (standaloneCandidate) {
+        return standaloneCandidate;
+      }
+
+      const subImgStandalone = this.extractSubImageText(document.body);
+      if (subImgStandalone && subImgStandalone.length >= 15) {
+        const score = this.calculateQuestionScore(document.body, subImgStandalone);
+        if (score >= 30) {
+          return {
+            type: 'question',
+            source: 'sub_image_standalone',
+            text: subImgStandalone,
+            questionText: subImgStandalone,
+            element: document.body,
+            turnMsgs: [{ element: document.body, text: subImgStandalone, role: 'assistant' }],
+            score: score
+          };
+        }
       }
 
       const inputEl = reactDispatcher.findChatInput();
@@ -6777,7 +7059,7 @@ XÁC NHẬN: Bạn đã hiểu rõ toàn bộ vai trò và quy tắc THPT trên 
         WorkerTimer.setTimeout(() => {
           this.downloadBlob(mdBlob, mdFilename);
           log('NOTEBOOK', `✅ Đã xuất Đề cương Markdown: ${mdFilename}`);
-        }, 1000);
+        }, 2000);
 
       } catch (err) {
         log('NOTEBOOK', `❌ Lỗi xuất đề cương: ${err.message}`, 'error');
@@ -6789,6 +7071,12 @@ XÁC NHẬN: Bạn đã hiểu rõ toàn bộ vai trò và quy tắc THPT trên 
       const p1 = root.querySelector ? root.querySelector('#bPause1') : null;
       const p2 = root.querySelector ? root.querySelector('#bPause2') : null;
 
+      this.captureCurrentPageData();
+
+      const hasData = (Array.isArray(STATE.notebookEntries) && STATE.notebookEntries.length > 0) ||
+                      (Array.isArray(STATE.conversationHistory) && STATE.conversationHistory.length > 0) ||
+                      (STATE.currentQuestion && STATE.currentQuestion.text);
+
       if (!STATE.isNotebookRecording) {
         STATE.isNotebookRecording = true;
         STATE.notebookStartTime = Date.now();
@@ -6797,15 +7085,19 @@ XÁC NHẬN: Bạn đã hiểu rõ toàn bộ vai trò và quy tắc THPT trên 
         if (p1) p1.innerHTML = '📓●';
         if (p2) p2.innerHTML = '📓 Notebook (ON)';
         log('NOTEBOOK', '📓 [NOTEBOOK BẬT]: Kích hoạt ghi chép Đề cương bài học & Tổng hợp tri thức');
-        log('NOTEBOOK', '🌟 Đang tự động quét tri thức web, câu hỏi & lời giải AI...');
-        this.captureCurrentPageData();
+        if (hasData) {
+          log('NOTEBOOK', '📥 Đã phát hiện nội dung bài học - Đang xuất Đề cương ôn tập Word (.docx)...');
+          this.exportAndDownload();
+        } else {
+          log('NOTEBOOK', '🌟 Đang tự động quét tri thức web, câu hỏi & lời giải AI...');
+        }
       } else {
         STATE.isNotebookRecording = false;
         p1?.classList.remove('notebook-active');
         p2?.classList.remove('notebook-active');
         if (p1) p1.innerHTML = '📓';
         if (p2) p2.innerHTML = '📓 Notebook';
-        log('NOTEBOOK', '📥 [NOTEBOOK DỪNG]: Đang kết xuất Đề cương ôn tập Word (.docx) & Markdown (.md)...');
+        log('NOTEBOOK', '📥 [NOTEBOOK DỪNG]: Đang kết xuất Đề cương ôn tập Word (.docx)...');
         this.exportAndDownload();
       }
     }
