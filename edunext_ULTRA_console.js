@@ -2905,16 +2905,16 @@
             }, 3000);
           }
         } else {
-          const nextBtn = document.querySelector(CONFIG.SELECTORS.LESSON_NEXT_BTN);
-          if (nextBtn && nextBtn.offsetParent !== null && !nextBtn.disabled && STATE.fsmState === FSM_STATE.IDLE && STATE.autoSolve) {
+          const actionBtn = this.findNextLessonActionElement ? this.findNextLessonActionElement() : document.querySelector(CONFIG.SELECTORS.LESSON_NEXT_BTN);
+          if (actionBtn && actionBtn.offsetParent !== null && !actionBtn.disabled && STATE.fsmState === FSM_STATE.IDLE && STATE.autoSolve) {
             if (!STATE.nextLessonTimer) {
-              log('VISION', '🎉 Phát hiện nút "Học bài tiếp theo" - Tự động chuyển bài sau 3s...');
+              log('VISION', '🎉 Phát hiện nút chuyển bài ("Tiếp tục sang phần sau / Bài tiếp theo") - Tự động chuyển sau 2s...');
               STATE.nextLessonTimer = setTimeout(async () => {
                 STATE.nextLessonTimer = null;
                 await this.navigateToNextLesson();
-              }, 3000);
+              }, 2000);
             }
-          } else if (!completionInfo && STATE.nextLessonTimer) {
+          } else if (!completionInfo && !actionBtn && STATE.nextLessonTimer) {
             clearTimeout(STATE.nextLessonTimer);
             STATE.nextLessonTimer = null;
           }
@@ -2924,6 +2924,31 @@
           this.checkForNewContent();
         }
       }, CONFIG.HEARTBEAT_INTERVAL_MS);
+    },
+
+    findNextLessonActionElement() {
+      try {
+        const nextBtn = document.querySelector(CONFIG.SELECTORS.LESSON_NEXT_BTN);
+        if (nextBtn && nextBtn.offsetParent !== null && !nextBtn.disabled) return nextBtn;
+
+        const inlineBtns = Array.from(document.querySelectorAll('button, a, div[role="button"], span[role="button"], .btn, .ant-btn, .quick-insert-btn'));
+        for (const btn of inlineBtns) {
+          if (btn.offsetParent === null || btn.disabled) continue;
+          if (btn.closest && (btn.closest('.di-c') || btn.closest('#broamstuck-di-root'))) continue;
+          const t = sanitizeText(btn.textContent || '').toLowerCase();
+          if (/tiếp\s*tục\s*(?:sang\s*)?(?:trang\s*)?phần\s*(?:sau|tiếp)|chuyển\s*(?:sang\s*)?(?:bài|phần)\s*(?:học\s*)?(?:mới|sau|tiếp)|sang\s*phần\s*sau|tiếp\s*tục\s*trang\s*phần\s*sau|bài\s*(?:học\s*)?tiếp\s*(?:theo)?$|buổi\s*học\s*tiếp\s*(?:theo)?|tiếp\s*tục\s*học|phần\s*(?:học\s*)?tiếp\s*theo|next\s*(?:lesson|activity|part|section)/i.test(t)) {
+            return btn;
+          }
+        }
+        return null;
+      } catch (_) {
+        return null;
+      }
+    },
+
+    isTransitionPrompt(text) {
+      if (!text || typeof text !== 'string') return false;
+      return /muốn\s*chuyển\s*sang\s*(?:bài|phần)\s*(?:học\s*)?(?:mới|tiếp\s*theo)|tiếp\s*tục\s*(?:sang\s*)?(?:trang\s*)?phần\s*(?:sau|tiếp)|bạn\s*có\s*muốn\s*(?:học|chuyển)\s*(?:tiếp|sang)|chuyển\s*sang\s*bài\s*(?:mới|tiếp)|tiếp\s*tục\s*trang\s*phần\s*sau|bạn\s*có\s*muốn\s*chuyển/i.test(text);
     },
 
     checkLessonCompletion() {
@@ -2972,9 +2997,21 @@
     },
 
     async navigateToNextLesson() {
-      log('SYS', '🚀 Bắt đầu tiến trình tự động tìm và chuyển bài học mới...');
+      log('SYS', '🚀 Bắt đầu tiến trình tự động tìm và chuyển bài học mới (Universal Multi-Subject Engine)...');
+      
+      const actionBtn = this.findNextLessonActionElement();
+      if (actionBtn) {
+        log('SYS', `🚀 Tự động click nút chuyển tiếp: "${sanitizeText(actionBtn.textContent || '')}"`);
+        actionBtn.click();
+        await this.handleAfterLessonSwitch();
+        return true;
+      }
+
       try {
-        const modalSelectors = ['.ant-modal-content', '.ant-modal', '[role="dialog"]', '.modal-content', '.swal2-modal'];
+        const modalSelectors = [
+          '.ant-modal-content', '.ant-modal', '[role="dialog"]', '.modal-content',
+          '.swal2-modal', '.ant-popover', '[class*="confirm-dialog"]'
+        ];
         for (const sel of modalSelectors) {
           const mEl = document.querySelector(sel);
           if (mEl && (mEl.offsetParent !== null || mEl.offsetHeight > 0)) {
@@ -2982,13 +3019,36 @@
             const targetBtn = modalBtns.find(b => {
               if (b.disabled) return false;
               const t = sanitizeText(b.textContent || '').toLowerCase();
-              return /tiếp\s*tục|bài\s*tiếp|tiếp\s*theo|học\s*tiếp|hoàn\s*thành|xác\s*nhận|đồng\s*ý|đóng|continue|next|ok|close/i.test(t);
+              return /tiếp\s*tục|bài\s*tiếp|tiếp\s*theo|học\s*tiếp|hoàn\s*thành|xác\s*nhận|đồng\s*ý|có|đóng|continue|next|ok|close/i.test(t);
             });
             if (targetBtn) {
-              log('SYS', `🚀 Tự động click nút trong Modal chúc mừng: "${sanitizeText(targetBtn.textContent || '')}"`);
+              log('SYS', `🚀 Tự động click nút trong Dialog/Modal: "${sanitizeText(targetBtn.textContent || '')}"`);
               targetBtn.click();
               await sleep(1500);
+              const afterBtn = this.findNextLessonActionElement();
+              if (afterBtn) {
+                afterBtn.click();
+                await this.handleAfterLessonSwitch();
+                return true;
+              }
             }
+          }
+        }
+      } catch (_) {}
+
+      try {
+        const activeTab = document.querySelector('.ant-tabs-tab-active, .w-segment--active, [class*="tab--active"]');
+        if (activeTab) {
+          let nextTab = activeTab.nextElementSibling;
+          while (nextTab && !nextTab.classList.contains('ant-tabs-tab') && !nextTab.classList.contains('w-segment')) {
+            nextTab = nextTab.nextElementSibling;
+          }
+          if (nextTab && nextTab.offsetParent !== null && !nextTab.classList.contains('ant-tabs-tab-disabled')) {
+            const tabTitle = sanitizeText(nextTab.textContent || 'Phần kế tiếp');
+            log('SYS', `📑 Chuyển sang Tab phân mục kế tiếp của bài học: "${tabTitle}"`);
+            nextTab.click();
+            await this.handleAfterLessonSwitch();
+            return true;
           }
         }
       } catch (_) {}
@@ -3016,26 +3076,33 @@
         }
       }
 
-      const nextBtn = document.querySelector(CONFIG.SELECTORS.LESSON_NEXT_BTN);
-      if (nextBtn && nextBtn.offsetParent !== null && !nextBtn.disabled) {
-        log('SYS', '🚀 Click nút chuyển bài học (LESSON_NEXT_BTN)...');
-        nextBtn.click();
-        await this.handleAfterLessonSwitch();
-        return true;
-      }
+      try {
+        const sidebarTrigger = document.querySelector('.ant-layout-sider-trigger, .lesson-list-toggle, [class*="sidebar-toggle"], [class*="menu-trigger"], button[aria-label*="menu" i], .anticon-menu');
+        if (sidebarTrigger && sidebarTrigger.offsetParent !== null) {
+          log('SYS', '📂 Đang mở Sidebar danh sách bài học để chuyển bài...');
+          sidebarTrigger.click();
+          await sleep(1000);
+          const newCards = Array.from(document.querySelectorAll(CONFIG.SELECTORS.LESSON_ITEM));
+          if (newCards.length > 0) {
+            let activeIdx = newCards.findIndex(c => c.classList.contains('w-lesson-item--active') || c.classList.contains('active'));
+            if (activeIdx !== -1 && activeIdx < newCards.length - 1) {
+              newCards[activeIdx + 1].click();
+              await this.handleAfterLessonSwitch();
+              return true;
+            }
+          }
+        }
+      } catch (_) {}
 
-      const inlineBtns = Array.from(document.querySelectorAll('button, a, div[role="button"]'));
-      for (const btn of inlineBtns) {
-        if (btn.offsetParent === null || btn.disabled) continue;
-        if (btn.closest && (btn.closest('.di-c') || btn.closest('#broamstuck-di-root'))) continue;
-        const t = sanitizeText(btn.textContent || '').toLowerCase();
-        if (/^(?:học\s*)?bài\s*(?:học\s*)?tiếp\s*(?:theo)?$|buổi\s*học\s*tiếp\s*(?:theo)?|tiếp\s*tục\s*học|next\s*(?:lesson|activity)/i.test(t)) {
-          log('SYS', `🚀 Click nút inline: "${t}"`);
-          btn.click();
+      try {
+        const pageNext = document.querySelector('.ant-pagination-next:not(.ant-pagination-disabled), [class*="btn-next-page"], button[aria-label="Next Page"]');
+        if (pageNext && pageNext.offsetParent !== null) {
+          log('SYS', '🚀 Chuyển sang trang phần bài học tiếp theo qua phân trang...');
+          pageNext.click();
           await this.handleAfterLessonSwitch();
           return true;
         }
-      }
+      } catch (_) {}
 
       const navSelectors = [
         '.activity-item.active + .activity-item',
@@ -3444,6 +3511,52 @@
       }
     },
 
+    scanMultipleChoiceQuiz() {
+      try {
+        const mcqSelectors = [
+          '.multiple-choice-question', '.quiz-question', '.question-options',
+          '.ant-radio-group', '.quiz-container', '[class*="multiple-choice"]',
+          '[class*="quiz-box"]', '[class*="question-choice"]', '.choice-list'
+        ];
+        for (const sel of mcqSelectors) {
+          const containers = document.querySelectorAll(sel);
+          for (const c of containers) {
+            if (!c || !c.isConnected) continue;
+            if (c.closest && (c.closest('.di-c') || c.closest('#broamstuck-di-root'))) continue;
+            if (c.offsetParent === null && !c.offsetHeight) continue;
+            let rawQ = '';
+            const qEl = c.querySelector('.question-title, [class*="title"], [class*="question-text"], p, h3, h4') || c.parentElement;
+            if (qEl) rawQ = this.extractCleanText(qEl, qEl.textContent || '');
+            if (!rawQ || rawQ.length < 10) rawQ = this.extractCleanText(c, c.textContent || '');
+            const optEls = c.querySelectorAll('.ant-radio-wrapper, [class*="option"], [class*="choice"], label, li');
+            const optTexts = [];
+            for (const o of optEls) {
+              const ot = sanitizeText(o.textContent || '');
+              if (ot.length > 1 && ot.length < 250 && !optTexts.includes(ot)) optTexts.push(ot);
+            }
+            if (rawQ.length >= 10 && optTexts.length >= 2) {
+              const fullQ = `${rawQ}\nCác lựa chọn:\n${optTexts.join('\n')}`;
+              const score = this.calculateQuestionScore(c, fullQ) + 20;
+              return {
+                type: 'question',
+                source: 'mcq_quiz',
+                text: fullQ,
+                questionText: fullQ,
+                element: c,
+                turnMsgs: [{ element: c, text: fullQ, role: 'assistant' }],
+                score: score,
+                isMCQ: true,
+                options: optTexts
+              };
+            }
+          }
+        }
+        return null;
+      } catch (_) {
+        return null;
+      }
+    },
+
     scanStandalonePlainText() {
       try {
         const textSelectors = [
@@ -3730,6 +3843,9 @@
         }
 
         if (cleanTurnText && cleanTurnText.length >= 5) {
+          if (this.isTransitionPrompt(cleanTurnText)) {
+            return { type: 'transition_prompt', text: cleanTurnText, element: turnLastEl };
+          }
           if (this.isReadyPrompt(cleanTurnText)) {
             return { type: 'ready_prompt', text: cleanTurnText, element: turnLastEl };
           }
@@ -3764,6 +3880,11 @@
             };
           }
         }
+      }
+
+      const mcqCandidate = this.scanMultipleChoiceQuiz();
+      if (mcqCandidate) {
+        return mcqCandidate;
       }
 
       const roundCandidate = this.scanRoundChatbox();
@@ -3924,6 +4045,18 @@
       if (!candidate) {
         if (Math.random() < 0.05) {
           log('VISION', 'ℹ Đang quét nội dung bài học & chờ câu hỏi xuất hiện...');
+        }
+        return;
+      }
+
+      if (candidate.type === 'transition_prompt') {
+        if (STATE.autoSolve && STATE.lastHandledTransitionText !== candidate.text) {
+          STATE.lastHandledTransitionText = candidate.text;
+          log('DETECT', `🚀 Phát hiện thông báo đề nghị chuyển bài học mới: "${candidate.text.substring(0, 60)}..."`);
+          await this.autoSendText('Có');
+          if (candidate.element) candidate.element.dataset.edunextAnswered = 'true';
+          await sleep(1500);
+          await this.navigateToNextLesson();
         }
         return;
       }
@@ -4420,19 +4553,34 @@
         combinedText = candidate.questionText;
       }
 
+      let foundOptions = [];
+      if (candidate.options && Array.isArray(candidate.options) && candidate.options.length > 0) {
+        foundOptions = [...candidate.options];
+      }
       if (turnLastEl) {
-        const optionEls = turnLastEl.querySelectorAll('.ant-radio-wrapper, .ant-checkbox-wrapper, [class*="option-item"], [class*="choice-item"], [class*="answer-option"], [role="radio"], [role="checkbox"], .quiz-option, .choice-btn');
-        if (optionEls.length > 0) {
-          const optTexts = [];
-          for (const opt of optionEls) {
-            const t = sanitizeText(opt.textContent || '');
-            if (t.length > 1 && !optTexts.includes(t)) optTexts.push(t);
-          }
-          if (optTexts.length > 0 && !optTexts.some(o => combinedText.includes(o))) {
-            combinedText += '\nCác lựa chọn:\n' + optTexts.join('\n');
-          }
+        const optionEls = turnLastEl.querySelectorAll('.ant-radio-wrapper, .ant-checkbox-wrapper, [class*="option-item"], [class*="choice-item"], [class*="answer-option"], [role="radio"], [role="checkbox"], .quiz-option, .choice-btn, .ant-radio-button-wrapper');
+        for (const opt of optionEls) {
+          const t = sanitizeText(opt.textContent || '');
+          if (t.length > 1 && t.length < 250 && !foundOptions.includes(t)) foundOptions.push(t);
         }
-
+      }
+      if (foundOptions.length === 0) {
+        const globalMCQs = document.querySelectorAll('.multiple-choice-question, .quiz-question, .question-options, .ant-radio-group, [class*="choice-list"]');
+        for (const g of globalMCQs) {
+          if (!g.isConnected || (g.offsetParent === null && !g.offsetHeight)) continue;
+          if (g.closest && (g.closest('.di-c') || g.closest('#broamstuck-di-root'))) continue;
+          const subOpts = g.querySelectorAll('.ant-radio-wrapper, [class*="option"], [class*="choice"], label, li');
+          for (const so of subOpts) {
+            const sot = sanitizeText(so.textContent || '');
+            if (sot.length > 1 && sot.length < 250 && !foundOptions.includes(sot)) foundOptions.push(sot);
+          }
+          if (foundOptions.length >= 2) break;
+        }
+      }
+      if (foundOptions.length > 0 && !foundOptions.some(o => combinedText.includes(o))) {
+        combinedText += '\nCác lựa chọn:\n' + foundOptions.join('\n');
+      }
+      if (turnLastEl) {
         const tables = turnLastEl.querySelectorAll('table');
         for (const tbl of tables) {
           try {
@@ -4522,7 +4670,7 @@
 
       const isErrorAnalysisQuestion = /sai\s*ở\s*(?:điểm\s*nào|đâu|chỗ\s*nào)|chỉ\s*ra\s*(?:lỗi\s*)?sai|lập\s*luận\s*(?:này\s*)?sai|tại\s*sao\s*sai|nhận\s*định\s*(?:này\s*)?sai|khẳng\s*định\s*(?:này\s*)?sai|sai\s*lầm\s*ở\s*đâu|lỗi\s*(?:sai)?\s*trong|lỗi\s*(?:trong|của|ở)\s*cách\s*làm|tìm\s*lỗi\s*sai|bác\s*bỏ\s*lập\s*luận|phản\s*biện|sai\s*ở\s*bước\s*nào|quy\s*ước\s*dấu|đơn\s*vị\s*nhiệt\s*độ|thay\s*thẳng\s*t\s*=|thang\s*đo\s*nhiệt\s*độ/i.test(combinedText);
 
-      const hasChoiceOptions = (turnLastEl && turnLastEl.querySelectorAll('.ant-radio-wrapper, .ant-checkbox-wrapper, [role="radio"], [role="checkbox"]').length > 0) || /(?:^|\n)\s*[A-D][\.\:\)]\s+/m.test(combinedText);
+      const hasChoiceOptions = foundOptions.length >= 2 || candidate.isMCQ || (turnLastEl && turnLastEl.querySelectorAll('.ant-radio-wrapper, .ant-checkbox-wrapper, [role="radio"], [role="checkbox"]').length > 0) || /(?:^|\n)\s*[A-D][\.\:\)]\s+/m.test(combinedText) || /[A-D]\)\s+[^?\n]+(?:\?|$)/.test(combinedText) || /theo\s*mẫu\s*sau\s*nhé\s*:\s*Trả\s*lời\s*:/i.test(combinedText);
 
       const isTrueFalseQuestion = /đúng\s*hay\s*sai|xác\s*định\s*tính\s*đúng\s*sai|true\s*or\s*false/i.test(combinedText);
 
@@ -4567,6 +4715,7 @@
       const data = {
         text: combinedText,
         questionType: questionType,
+        isMCQ: (questionType === 'MULTIPLE_CHOICE' || hasChoiceOptions),
         forbidNumerical: forbidNumerical,
         botHint: extractedBotHint,
         images: allImages,
@@ -5137,7 +5286,7 @@ LỊCH SỬ CÁC CÂU HỎI VỪA HOÀN THÀNH TRONG BÀI HỌC (tham khảo ti�
         ? STATE.wrongAnswers
         : [(STATE.conversationHistory[STATE.conversationHistory.length - 1]?.answer || '').replace(/^Trả\s*lời\s*:\s*/i, '').trim()].filter(Boolean);
 
-      if (qd.questionType === 'MULTIPLE_CHOICE') {
+      if (qd.questionType === 'MULTIPLE_CHOICE' || qd.isMCQ) {
         sys += `\n\n📌 CHỈ ĐẠO CHO DẠNG TRẮC NGHIỆM:
 - Đây là câu hỏi trắc nghiệm chọn phương án.`;
         if (isRetrying && wrongList.length > 0) {
@@ -5146,7 +5295,7 @@ LỊCH SỬ CÁC CÂU HỎI VỪA HOÀN THÀNH TRONG BÀI HỌC (tham khảo ti�
         } else {
           sys += `\n- Phân tích các phương án và chọn duy nhất 1 đáp án chính xác nhất.`;
         }
-        sys += `\n- Định dạng xuất: Trả lời: <chữ cái hoặc nội dung đáp án cốt lõi>.`;
+        sys += `\n- BẮT BUỘC TRẢ LỜI THEO MẪU: "Trả lời: <chữ cái>) <nội dung phương án>" (ví dụ: Trả lời: D) Lệch bội hoặc Trả lời: A. ...).`;
       } else if (qd.questionType === 'TRUE_FALSE') {
         sys += `\n\n📌 CHỈ ĐẠO CHO DẠNG ĐÚNG / SAI:`;
         if (isRetrying && wrongList.length > 0) {
@@ -5261,6 +5410,7 @@ LỊCH SỬ CÁC CÂU HỎI VỪA HOÀN THÀNH TRONG BÀI HỌC (tham khảo ti�
         cleanBtm = qd.bottomContext.replace(/data:image\/[a-zA-Z0-9+\-\.]+;base64,[A-Za-z0-9+/=]+/g, '').replace(/!\[.*?\]\([^\)]+\)/g, '').trim();
       }
 
+      const isMCQ = qd.isMCQ || qd.questionType === 'MULTIPLE_CHOICE' || /Các lựa chọn:|(?:^|\n)\s*[A-D][\.\:\)]|[A-D]\)\s+\S/i.test(actualQuestion);
       if (isRetrying) {
         const wrongList = (STATE.wrongAnswers && STATE.wrongAnswers.length > 0)
           ? STATE.wrongAnswers
@@ -5276,7 +5426,11 @@ LỊCH SỬ CÁC CÂU HỎI VỪA HOÀN THÀNH TRONG BÀI HỌC (tham khảo ti�
         if (wrongList.length > 0) {
           p += `⛔ CÁC ĐÁP ÁN ĐÃ THỬ VÀ BỊ TỪ CHỐI (TUYỆT ĐỐI CẤM LẶP LẠI): ${wrongList.join(', ')}\n\n`;
         }
-        p += `👉 BẮT BUỘC: Dựa vào đề bài gốc, lời báo sai và ĐẶC BIỆT LÀ GỢI Ý ĐỊNH HƯỚNG ở trên, phân tích vì sao các đáp án trước bị từ chối, và đưa ra câu trả lời mới hoàn toàn chính xác theo đúng bản chất hóa học/khoa học mà AI Web hướng dẫn.\nĐịnh dạng: Trả lời: <đáp án>`;
+        if (isMCQ) {
+          p += `📌 CHỈ DẪN TRẮC NGHIỆM: ĐÂY LÀ CÂU HỎI TRẮC NGHIỆM.\n- BẮT BUỘC chọn 1 phương án đúng nhất còn lại (LOẠI TRỪ các phương án đã sai ở trên).\n- BẮT BUỘC trả lời theo mẫu: "Trả lời: <chữ cái>) <nội dung đáp án>" (Ví dụ: Trả lời: D) Lệch bội hoặc Trả lời: A. ...)\n\n`;
+        } else {
+          p += `👉 BẮT BUỘC: Dựa vào đề bài gốc, lời báo sai và ĐẶC BIỆT LÀ GỢI Ý ĐỊNH HƯỚNG ở trên, phân tích vì sao các đáp án trước bị từ chối, và đưa ra câu trả lời mới hoàn toàn chính xác theo đúng bản chất hóa học/khoa học mà AI Web hướng dẫn.\nĐịnh dạng: Trả lời: <đáp án>\n\n`;
+        }
       } else {
         p += `CÂU HỎI BÀI TẬP: ${actualQuestion}\n\n`;
         if (effectiveHint) {
@@ -5284,6 +5438,9 @@ LỊCH SỬ CÁC CÂU HỎI VỪA HOÀN THÀNH TRONG BÀI HỌC (tham khảo ti�
         }
         if (cleanBtm && cleanBtm.length > 5) {
           p += `Dữ kiện bổ sung: ${cleanBtm.substring(0, 3000)}\n\n`;
+        }
+        if (isMCQ) {
+          p += `📌 CHỈ DẪN TRẮC NGHIỆM: ĐÂY LÀ CÂU HỎI TRẮC NGHIỆM.\n- BẮT BUỘC chọn 1 phương án đúng nhất.\n- BẮT BUỘC trả lời theo mẫu: "Trả lời: <chữ cái>) <nội dung đáp án>" (Ví dụ: Trả lời: D) Lệch bội hoặc Trả lời: A. ...)\n\n`;
         }
       }
       const personaPrefix = `Bạn là một học sinh THPT giỏi theo chương trình SGK mới của Bộ GD&ĐT Việt Nam (Kết nối tri thức, Cánh diều). Phong cách trả lời /human: Tự nhiên, ngắn gọn, gãy gọn, 100% tiếng Việt thuần túy, tuyệt đối KHÔNG markdown (**in đậm**, *nghiêng*), KHÔNG latex, KHÔNG dùng $, bắt buộc xuất: "Trả lời: <đáp án>".\n\n`;
