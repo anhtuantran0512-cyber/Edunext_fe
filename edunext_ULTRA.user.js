@@ -6659,6 +6659,32 @@ LỊCH SỬ CÁC CÂU HỎI VỪA HOÀN THÀNH TRONG BÀI HỌC (tham khảo ti�
           return cachedAns;
         }
       }
+
+      /* BỘ ĐỊNH TUYẾN THÔNG MINH: chấm độ khó câu hỏi + tự leo thang tuyến khi đã sai nhiều lần */
+      const qRaw = (qd.questionText || qd.text || '').trim();
+      const qTurnKey = qRaw.slice(0, 160).toLowerCase() + '#' + qRaw.length;
+      const qHasImage = !!(qd.hasImage || qd.image || qd.imageBase64 || (qd.images && qd.images.length > 0));
+      let difficulty = 0;
+      if ((STATE.retryCount || 0) >= 1) difficulty += 2;
+      if (qRaw.length > 400) difficulty += 1;
+      if (qHasImage) difficulty += 1;
+      if (['MULTI_STEP', 'ERROR_ANALYSIS', 'NUMERICAL', 'ESSAY', 'COMPARE_CONTRAST'].includes(qd.questionType)) difficulty += 1;
+      STATE.currentTurnDifficulty = difficulty;
+      if ((STATE.retryCount || 0) >= 2 && STATE.aiMode !== 'bridge' && STATE.lastRescueHash !== qTurnKey) {
+        let bridgeAlive = STATE.bridgeConnected === true;
+        try {
+          const hb = (typeof GM_getValue === 'function') ? (GM_getValue('EDUNEXT_BRIDGE_HEARTBEAT', 0) || 0) : 0;
+          bridgeAlive = bridgeAlive || (Date.now() - hb) < 25000;
+        } catch (_) {}
+        if (bridgeAlive) {
+          STATE.lastRescueHash = qTurnKey;
+          log('ROUTER', `🚑 Đã sai ${STATE.retryCount} lần — leo thang sang Gemini Bridge (tab đang mở) để giải cứu câu khó...`, 'warn');
+          const rescueAns = await this.solveViaBridge(qd);
+          if (rescueAns && rescueAns.trim()) return rescueAns;
+          log('ROUTER', '⚠️ Bridge chưa trả được đáp án, quay về tuyến hiện tại.', 'warn');
+        }
+      }
+
       if (STATE.aiMode === 'bridge') return this.solveViaBridge(qd);
 
       if (STATE.aiMode === 'gogoduck') {
@@ -6669,9 +6695,19 @@ LỊCH SỬ CÁC CÂU HỎI VỪA HOÀN THÀNH TRONG BÀI HỌC (tham khảo ti�
           if (apiAns && apiAns.trim()) return apiAns;
           log('GOGODUCK', '⚠️ API Key không giải được ảnh, tiếp tục giữ nguyên chế độ GogoDuck.', 'warn');
           return null;
+        } else if (qd.questionType === 'ESSAY' && (STATE.retryCount || 0) === 0) {
+          log('ROUTER', '✍️ Câu tự luận / viết đoạn: ưu tiên tuyến API chất lượng cao trước...');
+          const apiAns = await this.solveViaApiKey(qd);
+          if (apiAns && apiAns.trim()) return apiAns;
+          log('ROUTER', '⚠️ Tuyến API đang bận / cạn quota — chuyển bài tự luận về GogoDuck.', 'warn');
+          const duckEssay = await this.solveViaGogoDuck(qd);
+          return (duckEssay && duckEssay.trim()) ? duckEssay : null;
         } else {
           const duckAns = await this.solveViaGogoDuck(qd);
-          if (duckAns && duckAns.trim()) return duckAns;
+          if (duckAns && duckAns.trim()) {
+            const checked = await this.crossCheckAnswer(qd, duckAns);
+            return checked || duckAns;
+          }
           log('GOGODUCK', '⚠️ GogoDuck AI không phản hồi, tự động swap sang Bể chứa API Key giải cứu...', 'warn');
           const apiAns = await this.solveViaApiKey(qd);
           if (apiAns && apiAns.trim()) return apiAns;
@@ -6708,6 +6744,59 @@ LỊCH SỬ CÁC CÂU HỎI VỪA HOÀN THÀNH TRONG BÀI HỌC (tham khảo ti�
 
       log('AI', `⚠️ Toàn bộ ${BUILTIN_KEYS.length} Key Hệ Thống VIP đều đang cạn hạn mức (Quota 429). Giữ nguyên chế độ Key Api.`, 'warn');
       return null;
+    },
+
+    /* Kiểm chéo đáp án cho câu khó / câu đang sửa bài bằng một tuyến API độc lập */
+    async crossCheckAnswer(qd, primaryAns) {
+      try {
+        if (!primaryAns || !primaryAns.trim()) return null;
+        if (qd.images && qd.images.length > 0) return null;
+        const type = qd.questionType || 'GENERAL';
+        const retrying = (STATE.retryCount || 0) > 0;
+        const worthChecking = retrying || type === 'NUMERICAL' || type === 'MULTI_STEP';
+        if (!worthChecking) return null;
+        log('ROUTER', '🔎 Kiểm chéo đáp án bằng tuyến API độc lập để chống sai sót...');
+        const altAns = await this.solveViaApiKey(qd);
+        if (!altAns || !altAns.trim()) {
+          log('ROUTER', '⚠️ Không lấy được ý kiến kiểm chéo (tuyến API bận), giữ đáp án gốc.');
+          return null;
+        }
+        const normP = this.normalizeForCompare(primaryAns);
+        const normA = this.normalizeForCompare(altAns);
+        let agree = false;
+        let numericDecided = false;
+        if (type === 'NUMERICAL') {
+          const cleanNums = (str) => (String(str).match(/-?\d+(?:[.,]\d+)?/g) || [])
+            .map(x => x.replace(',', '.').replace(/\.0+$/, '').replace(/^\+/, ''));
+          const numsP = cleanNums(primaryAns);
+          const numsA = cleanNums(altAns);
+          if (numsP.length > 0 && numsA.length > 0) {
+            agree = numsA.includes(numsP[numsP.length - 1]);
+            numericDecided = true;
+          }
+        }
+        if (!numericDecided && !agree && normP && normA) {
+          agree = normP === normA || normP.includes(normA) || normA.includes(normP)
+            || (domScraper.isSameQuestion && domScraper.isSameQuestion(primaryAns, altAns));
+        }
+        if (agree) {
+          log('ROUTER', '✅ Kiểm chéo: hai tuyến đồng thuận, giữ đáp án gốc.');
+          return primaryAns;
+        }
+        log('ROUTER', `⚠️ Kiểm chéo phát hiện LỆCH: GogoDuck="${String(primaryAns).substring(0, 60)}" vs API="${String(altAns).substring(0, 60)}". Ưu tiên tuyến API mạnh hơn.`, 'warn');
+        return altAns;
+      } catch (e) {
+        log('ROUTER', '⚠️ Kiểm chéo gặp lỗi, giữ đáp án gốc: ' + (e && e.message ? e.message : e), 'warn');
+        return null;
+      }
+    },
+
+    normalizeForCompare(s) {
+      if (!s || typeof s !== 'string') return '';
+      return s.toLowerCase()
+        .replace(/^trả\s*lời\s*[:\-]?\s*/i, '')
+        .replace(/[\s\(\)\[\]\{\}"'“”‘’.,;:!?…\-\*]+/g, '')
+        .slice(0, 240);
     },
 
     async solveWithMultiKeyPool(qd, targetPool = null) {
@@ -7068,8 +7157,10 @@ LỊCH SỬ CÁC CÂU HỎI VỪA HOÀN THÀNH TRONG BÀI HỌC (tham khảo ti�
       const optimalTokens = isLongQuestion ? 1280 : 1024;
       const genConfig = { temperature: dynamicTemp, maxOutputTokens: optimalTokens };
       if (activeModel.includes('thinking')) {
-        const needsReasoning = STATE.retryCount > 0 || /toán|phương\s*trình|chứng\s*minh|vật\s*lí|vật\s*lý|hóa|sinh\s*học|tính\s*toán|tích\s*phân|đạo\s*hàm/i.test(qd.text || '');
-        genConfig.thinkingConfig = { thinkingBudget: needsReasoning ? 512 : 0 };
+        const needsReasoning = STATE.retryCount > 0
+          || (STATE.currentTurnDifficulty || 0) >= 2
+          || /toán|phương\s*trình|chứng\s*minh|vật\s*lí|vật\s*lý|hóa|sinh\s*học|tính\s*toán|tích\s*phân|đạo\s*hàm/i.test(qd.text || '');
+        genConfig.thinkingConfig = { thinkingBudget: needsReasoning ? (STATE.retryCount >= 2 ? 1024 : 512) : 0 };
       }
 
       const payload = {
