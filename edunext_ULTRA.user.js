@@ -4022,7 +4022,7 @@
     extractBotHintText(text) {
       if (!text || typeof text !== 'string') return '';
       const hintBlocks = [];
-      const hintRegex = /(?:(?:^|\n)\s*(?:Gợi\s*ý|Lưu\s*ý|Ghi\s*chú|Note|Chỉ\s*dẫn|Hướng\s*dẫn)[\s:\n\-\•\*\·\>\~|·\u2022\u00b7\u25cf\u25cb]+)([\s\S]+?)(?=(?:(?:\n|^)\s*(?:Câu\s*hỏi|Question|Bài\s*tập|INT:|Feedback|(?:Hãy|Bạn\s*hãy|Vui\s*lòng|Em\s*hãy)\s*(?:trả\s*lời|điền|nhập|gửi|viết|nộp)|(?:🧠|💡|⚠️|📌)?\s*Đã\s*chấm\s*bằng\s*AI)|\s*$))/gi;
+      const hintRegex = /(?:(?:^|\n)|(?:[\.!\?…]\s+))[^\w\n\r\u00C0-\u024F\u1E00-\u1EFF\u0300-\u036F]{0,6}(?:Gợi\s*ý|Lưu\s*ý|Ghi\s*chú|Chú\s*ý|Mẹo|Note|Chỉ\s*dẫn|Hướng\s*dẫn)[\s:\n\-\•\*\·\>\~\|·\u2022\u00b7\u25cf\u25cb\]\[\)\(–—]+([\s\S]+?)(?=(?:(?:\n|^)\s*(?:Câu\s*hỏi|Question|Bài\s*tập|INT:|Feedback|(?:Hãy|Bạn\s*hãy|Vui\s*lòng|Em\s*hãy)\s*(?:trả\s*lời|điền|nhập|gửi|viết|nộp)|(?:🧠|💡|⚠️|📌)?\s*Đã\s*chấm\s*bằng\s*AI)|\s*$))/gi;
       let m;
       while ((m = hintRegex.exec(text)) !== null) {
         const rawHint = (m[1] || '')
