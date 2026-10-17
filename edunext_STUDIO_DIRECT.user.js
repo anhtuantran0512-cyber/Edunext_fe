@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         EdUnExT_STUDIO_DIRECT
 // @namespace    https://edunext.fpt.edu.vn/
-// @version      2.2.6
+// @version      2.2.7
 // @description  AUTO Giải edunext bản prenium
 // @author       BroAmStuck Studio
 // @updateURL    https://raw.githubusercontent.com/anhtuantran0512-cyber/Edunext_fe/main/edunext_STUDIO_DIRECT.user.js
@@ -2616,6 +2616,7 @@
     isRecording: false,
     isPaused: false,
     retryCount: 0,
+    correctiveRetry: false,
     wrongAnswers: [],
     forbidNumericalAnswers: false,
     currentQuestion: null,
@@ -3816,6 +3817,7 @@
       STATE.currentQuestion = null;
       STATE.currentAnswer = null;
       STATE.retryCount = 0;
+      STATE.correctiveRetry = false;
       STATE.wrongAnswers = [];
       STATE.activeQuestionCandidate = null;
       STATE.lastAnsweredQuestionText = '';
@@ -4020,7 +4022,7 @@
     extractBotHintText(text) {
       if (!text || typeof text !== 'string') return '';
       const hintBlocks = [];
-      const hintRegex = /(?:(?:^|\n)\s*(?:Gợi\s*ý|Lưu\s*ý|Ghi\s*chú|Note|Chỉ\s*dẫn|Hướng\s*dẫn)[\s:\n\-\•\*\·\>\~|·\u2022\u00b7\u25cf\u25cb]+)([\s\S]+?)(?=(?:(?:\n|^)\s*(?:Câu\s*hỏi|Question|Bài\s*tập|INT:|Feedback|(?:Hãy|Bạn\s*hãy|Vui\s*lòng|Em\s*hãy)\s*(?:trả\s*lời|điền|nhập|gửi|viết|nộp)|(?:🧠|💡|⚠️|📌)?\s*Đã\s*chấm\s*bằng\s*AI)|\s*$))/gi;
+      const hintRegex = /(?:(?:^|\n)|(?:[\.!\?…]\s+))[^\w\n\r\u00C0-\u024F\u1E00-\u1EFF\u0300-\u036F]{0,6}(?:Gợi\s*ý|Lưu\s*ý|Ghi\s*chú|Chú\s*ý|Mẹo|Note|Chỉ\s*dẫn|Hướng\s*dẫn)[\s:\n\-\•\*\·\>\~\|·\u2022\u00b7\u25cf\u25cb\]\[\)\(–—]+([\s\S]+?)(?=(?:(?:\n|^)\s*(?:Câu\s*hỏi|Question|Bài\s*tập|INT:|Feedback|(?:Hãy|Bạn\s*hãy|Vui\s*lòng|Em\s*hãy)\s*(?:trả\s*lời|điền|nhập|gửi|viết|nộp)|(?:🧠|💡|⚠️|📌)?\s*Đã\s*chấm\s*bằng\s*AI)|\s*$))/gi;
       let m;
       while ((m = hintRegex.exec(text)) !== null) {
         const rawHint = (m[1] || '')
@@ -5080,6 +5082,7 @@
         STATE.activeQuestionCandidate = candidate;
         if (STATE.autoSolve && STATE.fsmState === FSM_STATE.IDLE) {
           STATE.retryCount = 0;
+          STATE.correctiveRetry = false;
           STATE.wrongAnswers = [];
           STATE.forbidNumericalAnswers = false;
           STATE.currentQuestionTurnElement = qEl;
@@ -6399,6 +6402,9 @@ ${langRules}
 - Phân tích chính xác từng từ khóa gợi ý (ví dụ: gợi ý về cơ chế "hòa trộn" giữa các tính trạng của bố mẹ giống như hai màu mực, từ khóa trong ngoặc vuông, v.v.).
 - Dựa trực tiếp vào các gợi ý đó để xác định ngay học thuyết / đáp án chính xác mà hệ thống đang hướng tới.
 - Tuyệt đối không chọn lại đáp án cũ! Nếu câu hỏi yêu cầu nhiều ý, phải liệt kê đầy đủ từng ý (1., 2., 3.).`;
+        if (STATE.correctiveRetry) {
+          sys += `\n🛑 TỐI HẬU THƯ SỬA LỖI LẶP: Lần trước bạn đã lặp lại y nguyên một đáp án ĐÃ BỊ CHẤM SAI. Nếu tiếp tục lặp (kể cả viết lại bằng từ đồng nghĩa, thêm bớt trong ngoặc hay đổi thứ tự chữ), bài sẽ bị 0 điểm. BẮT BUỘC đổi hướng giải hoàn toàn khác; gạch bỏ triệt để từng đáp án trong danh sách cấm ở trên và tự đối chiếu đáp án mới với danh sách đó trước khi xuất ra.`;
+        }
       } else if (STATE.conversationHistory.length > 0) {
         const recent = STATE.conversationHistory.slice(-6);
         sys += `
@@ -6555,6 +6561,9 @@ LỊCH SỬ CÁC CÂU HỎI VỪA HOÀN THÀNH TRONG BÀI HỌC (tham khảo ti�
         if (wrongList.length > 0) {
           p += 'Các đáp án đã sai (không chọn lại): ' + wrongList.join(', ') + '\n';
         }
+        if (STATE.correctiveRetry) {
+          p += '🛑 TỐI HẬU: lần trước bạn lặp lại y nguyên đáp án đã bị chấm sai. Tuyệt đối không lặp lại dưới mọi hình thức; phải đưa ra đáp án KHÁC HOÀN TOÀN.\n';
+        }
         if (qd.questionType === 'ESSAY') {
           p += '\nYêu cầu: Đây là câu TỰ LUẬN / VIẾT ĐOẠN: suy luận âm thầm, dòng đầu ghi "Trả lời:" rồi xuống dòng viết TRỌN bài làm theo đúng yêu cầu đề (đủ mở - thân - kết); TUYỆT ĐỐI không xuất nháp, không lặp đề.';
         } else {
@@ -6602,6 +6611,9 @@ LỊCH SỬ CÁC CÂU HỎI VỪA HOÀN THÀNH TRONG BÀI HỌC (tham khảo ti�
         }
         if (wrongList.length > 0) {
           p += '⛔ Các đáp án đã sai (tuyệt đối không chọn lại): ' + wrongList.join(', ') + '\n\n';
+        }
+        if (STATE.correctiveRetry) {
+          p += '🛑 TỐI HẬU: lần trước bạn lặp lại y nguyên đáp án đã bị chấm sai. Tuyệt đối không lặp lại dưới mọi hình thức; phải đưa ra đáp án KHÁC HOÀN TOÀN.\n\n';
         }
       } else {
         p += 'CÂU HỎI BÀI TẬP: ' + actualQuestion + '\n\n';
@@ -7956,11 +7968,14 @@ XÁC NHẬN: Bạn đã hiểu rõ toàn bộ vai trò và quy tắc THPT trên 
       }
       const prevQText = (STATE.currentQuestion && STATE.currentQuestion.text) || '';
       const isNewQ = !prevQText || (domScraper.isSameQuestion ? !domScraper.isSameQuestion(prevQText, data.text) : prevQText !== data.text);
-      if (isNewQ) {
+      /* Chống lặp đáp án sai: khi ĐANG SỬA BÀI, bản trích xuất lại có thể lệch nhẹ (khung đề chen thêm lời phê) — TUYỆT ĐỐI giữ ký ức đáp án sai + phản hồi giáo viên */
+      if (isNewQ && (STATE.retryCount || 0) === 0) {
         STATE.wrongAnswers = [];
         STATE.lastBotFeedbackText = '';
         STATE.lastBotHintText = '';
-        if (STATE.retryCount > 0) STATE.retryCount = 0;
+        STATE.correctiveRetry = false;
+      } else if (isNewQ) {
+        log('DETECT', '♻️ Đang trong vòng sửa bài: giữ nguyên ký ức đáp án sai & phản hồi giáo viên (chống AI lặp lại đáp án cũ).', 'warn');
       }
       STATE.currentQuestion = data;
       this.transition(FSM_STATE.SOLVING);
@@ -8092,7 +8107,10 @@ XÁC NHẬN: Bạn đã hiểu rõ toàn bộ vai trò và quy tắc THPT trên 
       }
 
       let cleanA = domScraper.cleanAnswerText(ansText);
-      cleanA = cleanA.replace(/\r?\n+/g, ' ').replace(/\s{2,}/g, ' ').trim();
+      const keepParagraphs = !!(STATE.currentQuestion && STATE.currentQuestion.questionType === 'ESSAY');
+      cleanA = keepParagraphs
+        ? cleanA.replace(/\r\n?/g, '\n').replace(/[ \t]{2,}/g, ' ').replace(/\n{3,}/g, '\n\n').trim()
+        : cleanA.replace(/\r?\n+/g, ' ').replace(/\s{2,}/g, ' ').trim();
 
       const qd = STATE.currentQuestion;
       const qdText = qd ? qd.text : '';
@@ -8216,6 +8234,62 @@ XÁC NHẬN: Bạn đã hiểu rõ toàn bộ vai trò và quy tắc THPT trên 
         }
       }
 
+      /* ⛔ CHỐT CHẶN LẶP VÔ HẠN: TUYỆT ĐỐI không nộp lại đáp án đã bị chấm SAI (chống lặp làm mãi một câu sai) */
+      const readyLike = /^(?:sẵn\s*sàng|ready|ok|tiếp\s*tục)$/i.test(cleanA.trim());
+      if (!readyLike && cleanA.trim() && STATE.wrongAnswers && STATE.wrongAnswers.length > 0) {
+        const letterOf = (s) => {
+          const m = String(s || '').replace(/^trả\s*lời\s*[:\-]?\s*/i, '').match(/^\(?\s*([A-Da-d])\s*(?:[\)\.\:\-]|$)/);
+          return m ? m[1].toUpperCase() : '';
+        };
+        const numVal = (s) => {
+          const m = String(s || '').replace(/^trả\s*lời\s*[:\-]?\s*/i, '').trim().match(/^([-+]?\d+(?:[.,]\d+)?)\s*[a-zA-Z%°\/]{0,8}$/);
+          return m ? Number(m[1].replace(',', '.')) : NaN;
+        };
+        const normNow = this.normalizeForCompare(cleanA);
+        const myLetter = letterOf(cleanA);
+        const myNum = numVal(cleanA);
+        const bannedList = STATE.wrongAnswers.map(w => ({ l: letterOf(w), n: numVal(w), z: this.normalizeForCompare(w) }));
+        const isRepeatAns = bannedList.some(b => {
+          if (myLetter && b.l) return myLetter === b.l;
+          if (!Number.isNaN(myNum) && !Number.isNaN(b.n)) return myNum === b.n;
+          return normNow.length >= 2 && b.z === normNow;
+        });
+        if (isRepeatAns) {
+          if (!STATE.correctiveRetry) {
+            STATE.correctiveRetry = true;
+            log('INJECT', `🔁 AI định nộp lại đáp án ĐÃ SAI ("${cleanA.substring(0, 45)}") — đã chặn, bắt giải lại kèm chỉ thị khẩn cấp!`, 'warn');
+            this.transition(FSM_STATE.EXTRACTION);
+            return;
+          }
+          const tfPick = cleanA.toLowerCase().match(/(không\s*đúng|đúng|sai|true|false)/);
+          const isTFAns = (qd && qd.questionType === 'TRUE_FALSE') || !!(tfPick && (cleanA.trim().length < 40 || /^(?:không\s*đúng|đúng|sai|true|false)/i.test(cleanA.trim())));
+          if (isTFAns) {
+            const wasNegative = tfPick ? /^(?:không\s*đúng|sai|false)$/i.test(tfPick[1]) : /^(?:sai|false)/i.test(cleanA.trim());
+            cleanA = wasNegative ? 'Đúng' : 'Sai';
+            log('INJECT', `⛔ Vẫn lặp đáp án Đúng/Sai — tự động ĐẢO nhận định thành "${cleanA}" để phá vòng lặp!`, 'warn');
+          } else if (myLetter) {
+            const triedLetters = new Set(bannedList.map(b => b.l).filter(Boolean));
+            let nextL = '';
+            for (const L of ['A', 'B', 'C', 'D']) {
+              if (!triedLetters.has(L) && L !== myLetter) { nextL = L; break; }
+            }
+            if (!nextL) nextL = 'ABCD'[('ABCD'.indexOf(myLetter) + 1) % 4];
+            let optBody = '';
+            const optMatch = (qdText || '').match(new RegExp('(?:^|\\n)\\s*' + nextL + '[)\\.\\:\\-]\\s*([^\\n]{2,150})', 'i'));
+            if (optMatch) optBody = optMatch[1].trim();
+            cleanA = optBody ? (nextL + ') ' + optBody) : (nextL + ')');
+            log('INJECT', `⛔ Vẫn lặp phương án ${myLetter} — tự động chuyển sang phương án chưa thử: "${cleanA.substring(0, 45)}"!`, 'warn');
+          } else {
+            log('FAIL', '💀 AI vẫn lặp lại đáp án đã bị chấm sai (dạng tự luận/điền khuyết) — tạm dừng để bạn kiểm tra, không nộp lặp gây phí lượt.', 'error');
+            playErrorBeep();
+            this.transition(FSM_STATE.PAUSED);
+            pulseErrorBorder();
+            return;
+          }
+        }
+        STATE.correctiveRetry = false;
+      }
+
       if (/^(?:sẵn\s*sàng|ready|ok|tiếp\s*tục)$/i.test(cleanA.trim())) {
         cleanA = 'Sẵn sàng';
       } else {
@@ -8300,6 +8374,7 @@ XÁC NHẬN: Bạn đã hiểu rõ toàn bộ vai trò và quy tắc THPT trên 
         STATE.questionsSolved++;
         STATE.questionsCorrect++;
         STATE.retryCount = 0;
+        STATE.correctiveRetry = false;
         STATE.wrongAnswers = [];
         STATE.lastBotFeedbackText = '';
         updateStats();
@@ -8363,6 +8438,7 @@ XÁC NHẬN: Bạn đã hiểu rõ toàn bộ vai trò và quy tắc THPT trên 
       log('FAIL', `💀 ĐÃ THỬ ${CONFIG.MAX_RETRIES} LẦN NHƯNG CHƯA ĐÚNG. Tạm dừng để bạn kiểm tra thủ công.`);
       playErrorBeep();
       STATE.retryCount = 0;
+      STATE.correctiveRetry = false;
       this.transition(FSM_STATE.PAUSED);
       pulseErrorBorder();
     },

@@ -10,7 +10,7 @@ Nói gọn: khi trang Edunext hiện câu hỏi, script tự đọc đề, nhờ
 
 Script chạy y như mình làm bài, theo đúng thứ tự:
 
-1. **Đọc đề.** Script dò các khung chữ trên trang để biết đâu là câu hỏi. Nó bỏ qua những thứ linh tinh (nút bấm, emoji, chữ trang trí) và giữ lại phần đề. Đề có hình (bảng, đồ thị...) thì lấy hình đó gửi kèm cho AI đọc. Nếu có nhiều khung cùng lúc, nó chọn khung "giống câu hỏi" nhất.
+1. **Đọc đề.** Script dò các khung chữ trên trang để biết đâu là câu hỏi. Nó bỏ qua những thứ linh tinh (nút bấm, emoji, chữ trang trí) và giữ lại phần đề. Đề có hình (bảng, đồ thị...) thì lấy hình đó gửi kèm cho AI đọc. Gợi ý của giáo viên ghi kèm trong đề — kể cả khi đầu dòng có emoji hay gạch đầu dòng (💡 Gợi ý:, 📌 Lưu ý:, • Chú ý:...) — cũng được nhặt ra gửi AI. Nếu có nhiều khung cùng lúc, nó chọn khung "giống câu hỏi" nhất.
 
 2. **Nhờ AI giải.** Có 3 chế độ, chọn trong GUI:
    - **API Key (mặc định):** script có sẵn một bể key dùng chung. Key bận hoặc hết hạn mức thì tự xoay qua key khác, hết cả bể thì còn tuyến dự phòng. Bạn có key riêng (Google AI hoặc OpenRouter) thì dán vào GUI, script sẽ ưu tiên dùng key của bạn trước.
@@ -21,7 +21,7 @@ Script chạy y như mình làm bài, theo đúng thứ tự:
 
 3. **Nộp bài.** Trắc nghiệm: script đọc các phương án rồi nộp kèm chữ cái (A/B/C/D...). Tự luận: điền đáp án vào ô trả lời rồi bấm nộp.
 
-4. **Đọc kết quả.** Đúng thì đi tiếp câu sau. Sai thì script lấy nhận xét của giáo viên gửi lại cho AI để xin đáp án mới, chỉ thử lại số lần giới hạn chứ không thử mãi. Sai tới 2 lần thì script tự leo thang: nếu đang mở tab Gemini, nó nhờ thẳng Gemini giải cứu câu đó. Câu số liệu hoặc câu đang sửa bài còn được "kiểm chéo" bằng một tuyến AI độc lập — hai bên ra kết quả lệch nhau thì ưu tiên bên mạnh hơn.
+4. **Đọc kết quả.** Đúng thì đi tiếp câu sau. Sai thì script lấy nhận xét của giáo viên gửi lại cho AI để xin đáp án mới, chỉ thử lại số lần giới hạn chứ không thử mãi. Nó nhớ dai: danh sách đáp án đã bị chấm sai và lời phê của giáo viên được giữ nguyên xuyên suốt các lần sửa, và trước khi nộp lại còn có chốt chặn — đáp án nào lặp lại đáp án sai cũ sẽ bị chặn ngay: cho AI giải lại một lần kèm tối hậu thư; nếu vẫn lì thì tự đảo Đúng/Sai, xoay sang phương án trắc nghiệm chưa thử, hoặc tạm dừng để bạn xem tay — thay vì nộp lặp làm phí lượt. Sai tới 2 lần thì script tự leo thang: nếu đang mở tab Gemini, nó nhờ thẳng Gemini giải cứu câu đó. Câu số liệu hoặc câu đang sửa bài còn được "kiểm chéo" bằng một tuyến AI độc lập — hai bên ra kết quả lệch nhau thì ưu tiên bên mạnh hơn.
 
 5. **Chống hỏi trùng & nhịp như người thật (đỡ spam tab Gemini).** Đề giống nhau hoặc vừa giải xong sẽ được trả bằng đáp án cũ trong vài phút thay vì hỏi lại AI. Nhiều câu dồn dập quá thì script tự giãn nhịp gửi. Nếu tab Gemini không trả lời sau 3 lần thử, script tự dừng để khỏi gửi lặp vô hạn. Lúc nộp bài, script cũng dừng 1-3 giây "đọc lại" trước khi bấm nộp (bài viết dài dừng lâu hơn) và giữ khoảng cách tối thiểu 7 giây giữa hai lần nộp — trông tự nhiên như người bấm thật.
 
