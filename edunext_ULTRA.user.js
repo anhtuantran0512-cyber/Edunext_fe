@@ -5718,6 +5718,9 @@
 
       const isTrueFalseQuestion = /đúng\s*hay\s*sai|xác\s*định\s*tính\s*đúng\s*sai|true\s*or\s*false/i.test(combinedText);
 
+      /* Dạng tự luận / viết đoạn (Văn, Sử - Địa...): cần hợp đồng trả lời riêng, KHÔNG ép "1 dòng tối đa 30 từ" */
+      const isEssayQuestion = /viết\s*(?:một\s*)?(?:đoạn|bài)\s*(?:văn|nghị\s*luận|thuyết\s*minh|biểu\s*cảm|tự\s*sự|phân\s*tích|miêu\s*tả)|nghị\s*luận|thuyết\s*minh|nêu\s*cảm\s*(?:nhận|nghĩ)|phát\s*biểu\s*cảm\s*nghĩ|trình\s*bày\s*(?:cảm\s*nhận|suy\s*nghĩ|quan\s*điểm|cảm\s*nghĩ)|cảm\s*nhận\s*(?:của\s*em|về)|suy\s*nghĩ\s*của\s*em|đóng\s*vai(?!\s*trò)|kể\s*lại|phân\s*tích\s*(?:đoạn\s*(?:văn|trích|thơ)|bài\s*thơ|tác\s*phẩm|nhân\s*vật|khổ\s*thơ)|\bwrite\s+(?:a\s+|an\s+)?(?:short\s+)?(?:paragraph|essay|letter|email|story|composition|description)|\bwrite\s+about\s+(?:your|a|an|the)\b|(?:viết|trình\s*bày)\s*(?:khoảng\s*)?\d+\s*[-–]?\s*\d*\s*từ|\babout\s+\d+\s+words\b/i.test(combinedText);
+
       const isMultiStepQuestion = /(?:ba|3|bốn|4|năm|5)\s*(?:kỹ\s*thuật|bước|yếu\s*tố|mục\s*tiêu|phương\s*pháp|nhiệm\s*vụ|đặc\s*điểm)|mô\s*tả\s*ít\s*nhất|liệt\s*kê\s*(?:ba|3|các)/i.test(combinedText);
 
       const isFillBlankQuestion = /_{2,}|\\[\s*\.{3,}\s*\\]|điền\s*(?:vào|từ|cụm\s*từ)|chỗ\s*trống/i.test(combinedText);
@@ -5746,6 +5749,7 @@
 
       if (hasChoiceOptions) questionType = 'MULTIPLE_CHOICE';
       else if (isTrueFalseQuestion) questionType = 'TRUE_FALSE';
+      else if (isEssayQuestion) questionType = 'ESSAY';
       else if (isErrorAnalysisQuestion || (forbidNumerical && /sai|lập\s*luận|dấu|nhiệt\s*độ/i.test(combinedText))) questionType = 'ERROR_ANALYSIS';
       else if (isMultiStepQuestion) questionType = 'MULTI_STEP';
       else if (isFillBlankQuestion) questionType = 'FILL_BLANK';
@@ -6349,6 +6353,14 @@ ${langRules}
 6. CÂU HỎI TRẮC NGHIỆM / CHỌN ĐÁP ÁN:
    - Chỉ xuất cụm từ cốt lõi hoặc chữ cái đáp án kèm nội dung ngắn gọn. Chữ cái phương án (A/B/C/D) là BẮT BUỘC, không được thiếu.`;
 
+      if (qd.questionType === 'ESSAY') {
+        sys += `\n\n⚠️ GHI ĐÈ QUAN TRỌNG — CÂU TỰ LUẬN / VIẾT ĐOẠN (ƯU TIÊN CAO NHẤT, THAY THẾ MỤC 4):
+- Đây là câu tự luận / viết đoạn / cảm nhận / nghị luận: BỎ QUA hoàn toàn quy tắc "chỉ xuất 1 dòng" và giới hạn "tối đa 30 từ" ở mục 4.
+- Viết trọn bài làm theo đúng yêu cầu đề: nếu đề nêu số đoạn / số từ / số câu thì TUYỆT ĐỐI tuân thủ; nếu đề không nêu thì viết khoảng 100-150 từ với đủ mở đoạn, thân đoạn, kết đoạn.
+- Bám sát ngữ liệu / tác phẩm / nhân vật / sự kiện trong đề; nêu dẫn chứng cụ thể, lập luận rõ ràng, diễn đạt tự nhiên đúng văn phong học sinh THPT.
+- Định dạng xuất: dòng đầu ghi "Trả lời:" rồi xuống dòng viết trọn bài làm (được phép nhiều câu, nhiều đoạn). KHÔNG xuất phần nháp, KHÔNG lặp lại đề bài, KHÔNG dùng markdown.`;
+      }
+
       if (qd.lessonContext && qd.lessonContext.length > 20) {
         const cleanCtx = qd.lessonContext.replace(/data:image\/[a-zA-Z0-9+\-\.]+;base64,[A-Za-z0-9+/=]+/g, '').replace(/!\[.*?\]\([^\)]+\)/g, '');
         sys += `\n\nNỘI DUNG TÀI LIỆU BÀI HỌC (tham khảo):\n${cleanCtx.substring(0, 35000)}`;
@@ -6424,6 +6436,15 @@ LỊCH SỬ CÁC CÂU HỎI VỪA HOÀN THÀNH TRONG BÀI HỌC (tham khảo ti�
           }
         } else {
           sys += `\n- Xác định rõ ràng: Đúng hoặc Sai, kèm theo 1 câu giải thích ngắn gọn lý do.`;
+        }
+      } else if (qd.questionType === 'ESSAY') {
+        sys += `\n\n📌 CHỈ ĐẠO CHO DẠNG TỰ LUẬN / VIẾT ĐOẠN (áp dụng GHI ĐÈ ở MỤC 4):`;
+        if (isRetrying && wrongList.length > 0) {
+          const prevEssay = String(wrongList[wrongList.length - 1] || '').substring(0, 240);
+          sys += `\n- ⚠️ Bài làm trước đó bị đánh giá CHƯA ĐẠT: "${prevEssay}". Đọc kỹ nhận xét của giáo viên, giữ lại các ý đúng và BỔ SUNG các ý / phần còn thiếu; KHÔNG viết lại y hệt bài cũ.
+- Nếu giáo viên yêu cầu thêm số đoạn / số từ / số câu cụ thể thì tuân thủ đúng lần này.`;
+        } else {
+          sys += `\n- Bài làm cần đúng trọng tâm, đủ ý, có dẫn chứng; trình bày sạch, đúng yêu cầu về độ dài / số đoạn của đề.`;
         }
       } else if (qd.questionType === 'FILL_BLANK') {
         sys += `\n\n📌 CHỈ ĐẠO CHO DẠNG ĐIỀN TỪ / KHUYẾT:
@@ -6534,7 +6555,11 @@ LỊCH SỬ CÁC CÂU HỎI VỪA HOÀN THÀNH TRONG BÀI HỌC (tham khảo ti�
         if (wrongList.length > 0) {
           p += 'Các đáp án đã sai (không chọn lại): ' + wrongList.join(', ') + '\n';
         }
-        p += '\nYêu cầu: Suy luận âm thầm, chỉ xuất DUY NHẤT 1 dòng: Trả lời: <đáp án ngắn gọn>. Nếu là trắc nghiệm thì xuất chữ cái kèm nội dung phương án (ví dụ: Trả lời: D) Lệch bội). TUYỆT ĐỐI không viết gì thêm sau đáp án.';
+        if (qd.questionType === 'ESSAY') {
+          p += '\nYêu cầu: Đây là câu TỰ LUẬN / VIẾT ĐOẠN: suy luận âm thầm, dòng đầu ghi "Trả lời:" rồi xuống dòng viết TRỌN bài làm theo đúng yêu cầu đề (đủ mở - thân - kết); TUYỆT ĐỐI không xuất nháp, không lặp đề.';
+        } else {
+          p += '\nYêu cầu: Suy luận âm thầm, chỉ xuất DUY NHẤT 1 dòng: Trả lời: <đáp án ngắn gọn>. Nếu là trắc nghiệm thì xuất chữ cái kèm nội dung phương án (ví dụ: Trả lời: D) Lệch bội). TUYỆT ĐỐI không viết gì thêm sau đáp án.';
+        }
         return p;
       }
 
@@ -6586,12 +6611,19 @@ LỊCH SỬ CÁC CÂU HỎI VỪA HOÀN THÀNH TRONG BÀI HỌC (tham khảo ti�
       }
 
       const isEngQuestion = /tiếng\s*anh|english|grammar|vocabulary|closest\s*in\s*meaning|opposite\s*in\s*meaning|synonym|antonym|pronunciation|choose\s*the\s*(?:best|correct)/i.test(actualQuestion);
+      const isEssayQ = qd.questionType === 'ESSAY';
       const persona = isEngQuestion
-        ? 'You are an excellent Vietnamese high-school student. Answer the question above in 100% natural English (no Vietnamese, no Chinese characters). Think silently, output ONLY the final answer, no markdown, no explanation.\n'
-        : 'Bạn là học sinh THPT giỏi theo chương trình SGK mới của Bộ GD&ĐT Việt Nam. Hãy giải câu hỏi trên một cách ngắn gọn, súc tích, 100% tiếng Việt thuần túy, suy nghĩ âm thầm và KHÔNG xuất lời giải ra ngoài; tuyệt đối KHÔNG dùng ký tự markdown hay định dạng rườm rà.\n';
+        ? (isEssayQ
+          ? 'You are an excellent Vietnamese high-school student. This is a WRITING task: produce the complete written work requested (paragraph / essay / letter...), 100% natural English, no markdown, no explanation.\n'
+          : 'You are an excellent Vietnamese high-school student. Answer the question above in 100% natural English (no Vietnamese, no Chinese characters). Think silently, output ONLY the final answer, no markdown, no explanation.\n')
+        : (isEssayQ
+          ? 'Bạn là học sinh THPT giỏi theo chương trình SGK mới của Bộ GD&ĐT Việt Nam. Đây là câu TỰ LUẬN / VIẾT ĐOẠN: hãy viết trọn vẹn bài làm theo đúng yêu cầu đề, 100% tiếng Việt thuần túy và tự nhiên; suy nghĩ âm thầm, KHÔNG xuất phần nháp; tuyệt đối KHÔNG dùng ký tự markdown hay định dạng rườm rà.\n'
+          : 'Bạn là học sinh THPT giỏi theo chương trình SGK mới của Bộ GD&ĐT Việt Nam. Hãy giải câu hỏi trên một cách ngắn gọn, súc tích, 100% tiếng Việt thuần túy, suy nghĩ âm thầm và KHÔNG xuất lời giải ra ngoài; tuyệt đối KHÔNG dùng ký tự markdown hay định dạng rườm rà.\n');
       let rule = 'Bắt buộc xuất DUY NHẤT 1 dòng cuối cùng theo mẫu: "Trả lời: <đáp án ngắn gọn>"; tuyệt đối không viết gì thêm sau đáp án.';
       if (isMCQ) {
         rule = 'Bắt buộc xuất DUY NHẤT 1 dòng theo mẫu: "Trả lời: <chữ cái>) <nội dung phương án ngắn gọn>" (ví dụ: Trả lời: D) Lệch bội). Chữ cái phương án là bắt buộc, không được thiếu.';
+      } else if (isEssayQ) {
+        rule = 'Bắt buộc xuất dòng đầu "Trả lời:" rồi xuống dòng viết TRỌN bài làm tự luận (tuân thủ đúng số đoạn / số từ nếu đề yêu cầu; nếu đề không nêu thì khoảng 100-150 từ với đủ mở đoạn - thân đoạn - kết đoạn). Không xuất nháp, không lặp lại đề.';
       }
 
       return persona + p + rule;
