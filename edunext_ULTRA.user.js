@@ -5536,13 +5536,13 @@
     },
 
     async autoSendText(txt) {
-      await sleep(400);
+      await sleep(600 + Math.round(Math.random() * 700));
       const input = reactDispatcher.findChatInput();
       if (input) {
         reactDispatcher.ensureTextTab();
-        await sleep(150);
+        await sleep(180 + Math.round(Math.random() * 260));
         reactDispatcher.injectText(input, txt);
-        await sleep(350);
+        await sleep(500 + Math.round(Math.random() * 700));
         await reactDispatcher.submitAnswer(input);
         log('INJECT', `✅ Đã gửi: "${txt}"`);
       }
@@ -8229,7 +8229,14 @@ XÁC NHẬN: Bạn đã hiểu rõ toàn bộ vai trò và quy tắc THPT trên 
         return;
       }
 
-      await sleep(400);
+      /* Nhịp nộp giống người thật: dừng "đọc lại & kiểm tra" ngẫu nhiên trước khi bấm nộp (bài dài dừng lâu hơn) + sàn 7s chống nộp nhanh bất thường */
+      const isEssayTurn = !!(STATE.currentQuestion && STATE.currentQuestion.questionType === 'ESSAY');
+      const lenBoost = Math.min(1200, Math.round((cleanA.length / 400) * 400));
+      const preSubmitPause = (isEssayTurn ? 2200 : 1100) + lenBoost + Math.round(Math.random() * 1600);
+      const sincePrevSubmit = Date.now() - (STATE.lastSubmitTimestamp || 0);
+      const submitWait = Math.max(preSubmitPause, sincePrevSubmit < 7000 ? (7000 - sincePrevSubmit) : 0);
+      log('INJECT', `⏳ Nghỉ ${(submitWait / 1000).toFixed(1)}s trước khi bấm nộp (nhịp nộp giống người thật)...`);
+      await sleep(submitWait);
 
       const submitted = await reactDispatcher.submitAnswer(input);
       log('INJECT', `📤 Đã nộp đáp án: "${ansText.substring(0, 60)}..." (Thành công: ${submitted})`);
