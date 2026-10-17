@@ -17,13 +17,13 @@ Script chạy y như mình làm bài, theo đúng thứ tự:
    - **GogoDuck (AI miễn phí):** không cần key. Script thử lần lượt các trạm AI miễn phí Pollinations → DuckChat → Pollinations (bản mistral); trạm nào trả lời được thì lấy.
    - **Gemini (Cross-Tab Bridge):** script mở tab gemini.google.com (hoặc dùng tab đang mở), tự gõ đề vào khung chat của Gemini, chờ trả lời rồi mang đáp án về tab Edunext để nộp. Hai tab nói chuyện với nhau qua Tampermonkey, nên cứ để tab Gemini mở trong lúc làm bài.
    
-   Mỗi câu hỏi đều được dặn kỹ cho AI (đúng môn, đúng dạng câu) để trả lời sát đề. Câu trả lời bị ép về một dòng ngắn gọn cho dễ điền; riêng trắc nghiệm thì bắt buộc kèm chữ cái phương án.
+   Mỗi câu hỏi đều được dặn kỹ cho AI (đúng môn, đúng dạng câu) để trả lời sát đề. Câu trả lời thường được gói gọn một dòng cho dễ điền; riêng trắc nghiệm thì bắt buộc kèm chữ cái phương án. Còn câu tự luận (viết đoạn, nghị luận, cảm nhận, kể lại, thuyết minh...) thì script nhận diện riêng và để AI viết trọn bài có mở - thân - kết, đúng số đoạn số từ nếu đề yêu cầu — không ép ngắn nữa.
 
 3. **Nộp bài.** Trắc nghiệm: script đọc các phương án rồi nộp kèm chữ cái (A/B/C/D...). Tự luận: điền đáp án vào ô trả lời rồi bấm nộp.
 
-4. **Đọc kết quả.** Đúng thì đi tiếp câu sau. Sai thì script lấy nhận xét của giáo viên gửi lại cho AI để xin đáp án mới, chỉ thử lại số lần giới hạn chứ không thử mãi.
+4. **Đọc kết quả.** Đúng thì đi tiếp câu sau. Sai thì script lấy nhận xét của giáo viên gửi lại cho AI để xin đáp án mới, chỉ thử lại số lần giới hạn chứ không thử mãi. Sai tới 2 lần thì script tự leo thang: nếu đang mở tab Gemini, nó nhờ thẳng Gemini giải cứu câu đó. Câu số liệu hoặc câu đang sửa bài còn được "kiểm chéo" bằng một tuyến AI độc lập — hai bên ra kết quả lệch nhau thì ưu tiên bên mạnh hơn.
 
-5. **Chống hỏi trùng (đỡ spam tab Gemini).** Đề giống nhau hoặc vừa giải xong sẽ được trả bằng đáp án cũ trong vài phút thay vì hỏi lại AI. Nhiều câu dồn dập quá thì script tự giãn nhịp gửi. Nếu tab Gemini không trả lời sau 3 lần thử, script tự dừng để khỏi gửi lặp vô hạn.
+5. **Chống hỏi trùng & nhịp như người thật (đỡ spam tab Gemini).** Đề giống nhau hoặc vừa giải xong sẽ được trả bằng đáp án cũ trong vài phút thay vì hỏi lại AI. Nhiều câu dồn dập quá thì script tự giãn nhịp gửi. Nếu tab Gemini không trả lời sau 3 lần thử, script tự dừng để khỏi gửi lặp vô hạn. Lúc nộp bài, script cũng dừng 1-3 giây "đọc lại" trước khi bấm nộp (bài viết dài dừng lâu hơn) và giữ khoảng cách tối thiểu 7 giây giữa hai lần nộp — trông tự nhiên như người bấm thật.
 
 6. **Sổ tay ôn tập.** Bật trong GUI: script tự gom câu hỏi và lời giải vào "đề cương", xuất ra file Word (.docx) hoặc Markdown (.md), kèm file log (.json) để xem lại.
 
