@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         EdUnExT_ULTRA
 // @namespace    https://edunext.fpt.edu.vn/
-// @version      2.2.5
+// @version      2.2.6
 // @description  AUTO Giải edunext bản prenium
 // @author       BroAmStuck Studio
 // @updateURL    https://raw.githubusercontent.com/anhtuantran0512-cyber/Edunext_fe/main/edunext_ULTRA.user.js
