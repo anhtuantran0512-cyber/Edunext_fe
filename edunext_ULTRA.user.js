@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         EdUnExT_ULTRA
 // @namespace    https://edunext.fpt.edu.vn/
-// @version      2.2.4
+// @version      2.2.5
 // @description  AUTO Giải edunext bản prenium
 // @author       BroAmStuck Studio
 // @updateURL    https://raw.githubusercontent.com/anhtuantran0512-cyber/Edunext_fe/main/edunext_ULTRA.user.js
@@ -1045,7 +1045,9 @@
     const activeReqIds = new Set();
     const processedReqIds = new Set();
     const bridgeResponseCache = new Map();
+    const bridgeCoreCache = new Map();
     let currentProcessingPrompt = '';
+    let currentProcessingCore = '';
 
     let latestCopiedFromGemini = '';
     try {
@@ -1715,7 +1717,17 @@
         return !!doc.querySelector('button[aria-label*="Stop" i], button[aria-label*="Dừng" i], button.stop-button, [data-mat-icon-name="stop"], mat-icon[fonticon="stop"], button[aria-label*="Dừng câu trả lời" i]');
       };
 
-      if (isGenerating() || isInputEmpty()) {
+      const countUserTurns = () => {
+        try {
+          return doc.querySelectorAll('user-query, .user-query, [data-message-author-role="user"], .query-text').length;
+        } catch (_) {
+          return 0;
+        }
+      };
+      const userTurnsBaseline = countUserTurns();
+      const hasNewUserTurn = () => countUserTurns() > userTurnsBaseline;
+
+      if (isGenerating() || isInputEmpty() || hasNewUserTurn()) {
         return true;
       }
 
@@ -1803,7 +1815,7 @@
         triggerBtn(sendBtnFound);
         for (let i = 0; i < 4; i++) {
           await sleepB(125);
-          if (isGenerating() || isInputEmpty()) {
+          if (isGenerating() || isInputEmpty() || hasNewUserTurn()) {
             return true;
           }
         }
@@ -1814,13 +1826,13 @@
 
       for (let i = 0; i < 6; i++) {
         await sleepB(200);
-        if (isGenerating() || isInputEmpty()) {
+        if (isGenerating() || isInputEmpty() || hasNewUserTurn()) {
           return true;
         }
       }
 
       /* Buoc 3: Phong thu dirty state neu Angular chua nhan dien text change */
-      if (!isGenerating() && !isInputEmpty()) {
+      if (!isGenerating() && !isInputEmpty() && !hasNewUserTurn()) {
         try {
           editor.focus();
           try {
@@ -1842,7 +1854,7 @@
 
       for (let i = 0; i < 8; i++) {
         await sleepB(200);
-        if (isGenerating() || isInputEmpty()) return true;
+        if (isGenerating() || isInputEmpty() || hasNewUserTurn()) return true;
       }
 
       return true;
@@ -2049,12 +2061,24 @@
 
       const pKey = req.prompt.trim();
       const pHash = computeSimpleHash(pKey);
+      const coreKey = (req.coreKey && typeof req.coreKey === 'string' && req.coreKey.length > 8) ? req.coreKey : null;
 
       if (/^CÂU HỎI BÀI TẬP:\s*đang\s*(?:phân\s*tích|xử\s*lý|tải|chờ)[\.\s…]*$/i.test(pKey) ||
           /^(?:đang\s*(?:phân\s*tích|xử\s*lý|tải|chờ|suy\s*nghĩ|soạn)|analyzing|processing)[\.\s…]*$/i.test(pKey)) {
         console.warn(`[EduNext Bridge] Bỏ qua prompt trạng thái / loading rác: "${pKey}"`);
         sendResponse(reqId, null, 'Ignored placeholder prompt', pHash);
         return;
+      }
+
+      if (!req.forceNew && coreKey && bridgeCoreCache.has(coreKey)) {
+        const coreHit = bridgeCoreCache.get(coreKey);
+        if (coreHit && coreHit.answer && coreHit.answer.length > 5 && (Date.now() - coreHit.timestamp) < 240000) {
+          console.log(`[EduNext Bridge] Trả ngay đáp án cho cùng đề bài (Core Cache): ${reqId}`);
+          setBadge('✅ Đã gửi đáp án về EduNext (Core Cache)!', '#10b981');
+          reportStatus(reqId, 'FINISHED', 'Đáp án đã có sẵn trong bộ đệm đề bài');
+          sendResponse(reqId, coreHit.answer, null, pHash);
+          return;
+        }
       }
 
       if (lastProcessedPrompt === pKey && (Date.now() - lastPromptTimestamp) < 60000 && lastGeneratedResponse && lastGeneratedResponse.length > 5) {
@@ -2077,7 +2101,7 @@
       }
 
       if (isBridgeProcessing) {
-        if (currentProcessingPrompt === pKey) {
+        if (currentProcessingPrompt === pKey || (coreKey && currentProcessingCore === coreKey)) {
           console.log(`[EduNext Bridge] Đang xử lý câu hỏi này, thêm ID chờ: ${reqId}`);
           activeReqIds.add(reqId);
           reportStatus(reqId, 'WAITING', 'Đang giải câu hỏi này trên Gemini...');
@@ -2099,8 +2123,8 @@
 
       if (lastPromptTimestamp > 0) {
         const elapsedSinceLast = Date.now() - lastPromptTimestamp;
-        if (elapsedSinceLast < 3000) {
-          const waitMs = 3000 - elapsedSinceLast;
+        if (elapsedSinceLast < 4500) {
+          const waitMs = 4500 - elapsedSinceLast;
           console.log(`[EduNext Bridge] Nhịp gửi Gemini: Nghỉ ${waitMs}ms chống spam...`);
           reportStatus(reqId, 'WAITING', 'Đang giãn cách nhịp gửi trên Gemini...');
           await sleepB(waitMs);
@@ -2112,6 +2136,7 @@
       activeReqIds.clear();
       activeReqIds.add(reqId);
       currentProcessingPrompt = pKey;
+      currentProcessingCore = coreKey || '';
       lastProcessedPrompt = pKey;
       lastPromptTimestamp = Date.now();
       latestCopiedFromGemini = '';
@@ -2214,6 +2239,13 @@
             const firstK = bridgeResponseCache.keys().next().value;
             bridgeResponseCache.delete(firstK);
           }
+          if (coreKey) {
+            bridgeCoreCache.set(coreKey, { answer: response, timestamp: Date.now() });
+            if (bridgeCoreCache.size > 40) {
+              const firstCoreK = bridgeCoreCache.keys().next().value;
+              bridgeCoreCache.delete(firstCoreK);
+            }
+          }
         }
         notifyAll(id => {
           reportStatus(id, 'FINISHED', 'Đã chuyển đáp án hoàn chỉnh về EduNext!');
@@ -2243,6 +2275,7 @@
       } finally {
         isBridgeProcessing = false;
         currentProcessingPrompt = '';
+        currentProcessingCore = '';
         latestCopiedFromGemini = '';
         activeReqIds.clear();
       }
@@ -2292,7 +2325,7 @@
           const req = JSON.parse(raw);
           if (req && req.id && req.id !== lastProcessedReqId && !isBridgeProcessing && !req.cancel) {
             const age = Date.now() - new Date(req.timestamp).getTime();
-            if (age < 15000) {
+            if (age < 55000) {
               await handleIncomingRequest(req);
             }
           }
@@ -4226,6 +4259,8 @@
           '.ant-radio-group', '.quiz-container', '[class*="multiple-choice"]',
           '[class*="quiz-box"]', '[class*="question-choice"]', '.choice-list'
         ];
+        let bestCandidate = null;
+        let bestScore = -1;
         for (const sel of mcqSelectors) {
           const containers = document.querySelectorAll(sel);
           for (const c of containers) {
@@ -4245,21 +4280,24 @@
             if (rawQ.length >= 10 && optTexts.length >= 2) {
               const fullQ = `${rawQ}\nCác lựa chọn:\n${optTexts.join('\n')}`;
               const score = this.calculateQuestionScore(c, fullQ) + 20;
-              return {
-                type: 'question',
-                source: 'mcq_quiz',
-                text: fullQ,
-                questionText: fullQ,
-                element: c,
-                turnMsgs: [{ element: c, text: fullQ, role: 'assistant' }],
-                score: score,
-                isMCQ: true,
-                options: optTexts
-              };
+              if (score >= bestScore) {
+                bestScore = score;
+                bestCandidate = {
+                  type: 'question',
+                  source: 'mcq_quiz',
+                  text: fullQ,
+                  questionText: fullQ,
+                  element: c,
+                  turnMsgs: [{ element: c, text: fullQ, role: 'assistant' }],
+                  score: score,
+                  isMCQ: true,
+                  options: optTexts
+                };
+              }
             }
           }
         }
-        return null;
+        return bestCandidate;
       } catch (_) {
         return null;
       }
@@ -4575,14 +4613,16 @@
       if (normA && normB) {
         if (normA === normB) return true;
         if (normA.length > 20 && normB.length > 20) {
-          if (normA.includes(normB) || normB.includes(normA)) return true;
           const minLen = Math.min(normA.length, normB.length);
-          if (minLen >= 30) {
-            const headA = normA.slice(0, 40);
-            const headB = normB.slice(0, 40);
+          const maxLen = Math.max(normA.length, normB.length);
+          const isBalanced = minLen >= 0.7 * maxLen;
+          if (isBalanced && (normA.includes(normB) || normB.includes(normA))) return true;
+          if (isBalanced && minLen >= 30) {
+            const headA = normA.slice(0, 60);
+            const headB = normB.slice(0, 60);
             if (headA === headB) return true;
-            const tailA = normA.slice(-40);
-            const tailB = normB.slice(-40);
+            const tailA = normA.slice(-60);
+            const tailB = normB.slice(-60);
             if (tailA === tailB) return true;
           }
         }
@@ -4736,7 +4776,7 @@
           if (cleanText.length < 10) continue;
 
           const score = this.calculateQuestionScore(el, cleanText);
-          if (score > bestScore && score >= 35) {
+          if (score >= bestScore && score >= 35) {
             bestScore = score;
             bestCandidate = {
               type: 'question',
@@ -4991,8 +5031,9 @@
 
         const isSameAsLast = this.isSameQuestion(qText, STATE.lastAnsweredQuestionText) ||
                              this.isSameQuestion(qText, STATE.lastAnsweredCandidateText);
+        const isInSolvedHistory = (STATE.conversationHistory || []).slice(-8).some(h => h && h.question && h.feedback === 'CORRECT' && this.isSameQuestion(qText, h.question));
         const isElementMarked = !!(qEl && qEl.dataset && qEl.dataset.edunextAnswered === 'true');
-        const isAlreadyAnswered = isSameAsLast || isElementMarked;
+        const isAlreadyAnswered = isSameAsLast || isElementMarked || isInSolvedHistory;
 
         if (isAlreadyAnswered) {
           if (candidate.feedback && candidate.feedback.hasFeedback) {
@@ -5055,10 +5096,10 @@
         t = t.replace(/(^|\n)([a-zA-ZÀ-Ỹà-ỹ\^0-9])\n(?=[a-zA-ZÀ-Ỹà-ỹ\^0-9](\n|$))/gm, '$1$2');
       }
 
-      t = t.replace(/a\s*[\^ˆ]/gi, m => m[0] === 'A' ? 'Â' : 'â');
-      t = t.replace(/e\s*[\^ˆ]/gi, m => m[0] === 'E' ? 'Ê' : 'ê');
-      t = t.replace(/o\s*[\^ˆ]/gi, m => m[0] === 'O' ? 'Ô' : 'ô');
-      t = t.replace(/a\s*[\(˘]/gi, m => m[0] === 'A' ? 'Ă' : 'ă');
+      t = t.replace(/a\s*[\^ˆ](?=\s|$)/gi, m => m[0] === 'A' ? 'Â' : 'â');
+      t = t.replace(/e\s*[\^ˆ](?=\s|$)/gi, m => m[0] === 'E' ? 'Ê' : 'ê');
+      t = t.replace(/o\s*[\^ˆ](?=\s|$)/gi, m => m[0] === 'O' ? 'Ô' : 'ô');
+      t = t.replace(/a\s*[\(˘](?=\s|$)/gi, m => m[0] === 'A' ? 'Ă' : 'ă');
 
       const decompileDict = [
         [/c\s*ô\s*n\s*g\s*t\s*h\s*ứ\s*c/gi, 'công thức'],
@@ -5092,7 +5133,7 @@
       }
 
       t = t.replace(/\/\*[\s\S]*?\*\//g, ' ');
-      t = t.replace(/(@[a-zA-Z0-9_-]+[^{]*\{[\s\S]*?\}|[^{}]*\{[^{}]*\})/g, ' ');
+      t = t.replace(/(@[a-zA-Z0-9_-]+[^{]*\{[\s\S]*?\}|[^{}\n]*\{[^{}\n]*:[^{}\n]*;[^{}\n]*\})/g, ' ');
       t = t.replace(/(?:margin|padding|font-size|display|overflow-[xy]|background|border|text-align)\s*:[^;]+;?/gi, ' ');
       t = t.replace(/!important/gi, ' ');
       t = t.replace(/\.(?:katex|math|ant-|w-)[a-zA-Z0-9_-]*/g, ' ');
@@ -5168,7 +5209,7 @@
       a = a.replace(/<thought(?:ful)?>[\s\S]*?<\/thought(?:ful)?>/gi, '');
       a = a.replace(/<thinking>[\s\S]*?<\/thinking>/gi, '');
 
-      a = a.replace(/^[\s\S]*?(?:(?:\*|\-)?\s*(?:let['’]s|here is|here's|here are|i will|i should|suy nghĩ|phân tích|nháp|tính nháp|bước \d)[\s\S]*?(?:["'“]?Trả\s*lời\s*:\s*|\n\n))/i, '');
+      a = a.replace(/^[\s\S]*?(?:(?:\*|\-)?\s*(?:let['’]s|here is|here's|here are|i will|i should|suy nghĩ|phân tích|nháp|tính nháp)[\s\S]*?(?:["'“]?Trả\s*lời\s*:\s*|\n\n))/i, '');
       a = a.replace(/^(?:\s*[\*\-]?\s*\d+\s*[\*\+\-\/]\s*\d+\s*=\s*\d+[^;\n]*\n+)+/g, '');
 
       a = this.cleanTextArtifacts(a);
@@ -5260,12 +5301,18 @@
         a = a.replace(enPattern, '');
 
         a = a.replace(/\s*\([a-zA-Z\s\-]{3,35}\)/g, (match) => {
-          const inside = match.replace(/[\s\(\)]/g, '').toLowerCase();
-          if (/^(adn|arn|atp|sgk|thpt|co2|h2o|adp|nadp|nadh)$/i.test(inside)) return match;
+          const inside = match.replace(/[\s\(\)]/g, '');
+          const insideLow = inside.toLowerCase();
+          if (/^(adn|arn|atp|sgk|thpt|co2|h2o|adp|nadp|nadh|naoh|hcl|nacl|koh|hbr|hcn|nst|abc|xyz)$/i.test(insideLow)) return match;
+          if (/^[A-Z]{2,}$/.test(inside)) return match;
+          const curSubj = typeof STATE !== 'undefined' ? STATE.currentQuestion : null;
+          if (curSubj && /toán|hình\s*học|hóa|dung\s*dịch|phương\s*trình|vật\s*lí|vật\s*lý/i.test(curSubj.text || '')) return match;
           return '';
         });
       }
 
+      a = a.replace(/[\u{1F000}-\u{1FAFF}\u{2600}-\u{27BF}\u{2B00}-\u{2BFF}\u{FE0F}]/gu, '');
+      a = a.replace(/\s*chúc\s*bạn\s+(?:học\s*tốt|thành\s*công|may\s*mắn)[\s\S]{0,80}$/i, '').trim();
       a = a.replace(/^[\s\)\.\,\;\:\-\*\`\>]+/, '').trim();
       a = a.replace(/["'”’\>\`]+$/g, '').trim();
       a = a.replace(/[ \t]{2,}/g, ' ');
@@ -5474,13 +5521,13 @@
 
       const hasRetryOrPartial = !isErrorQuestionContext && /tuy\s*nhiên|nhưng|mới\s*chỉ|chưa\s*đáp\s*ứng|chưa\s*đủ|chưa\s*hoàn\s*thành|chưa\s*hoàn\s*chỉnh|chưa\s*chỉ\s*ra|chưa\s*giải\s*thích|sửa\s*lại\s*câu\s*trả\s*lời|thử\s*sửa\s*lại|lưu\s*ý\s*xem|cần\s*liệt\s*kê\s*đủ|cần\s*bổ\s*sung|bổ\s*sung\s*thêm|bổ\s*sung\s*các\s*bước|thử\s*lại\s*lần\s*nữa|thử\s*suy\s*nghĩ\s*lại|bài\s*này\s*hơi\s*khó|chúng\s*ta\s*đang\s*ở\s*một\s*câu\s*hỏi\s*khác/i.test(allText);
 
-      const hasCross = allText.includes('✗') || /chưa\s*đúng|chưa\s*chính\s*xác|sai\s*rồi|not\s*quite\s*right|incorrect|chưa\s*phù\s*hợp/i.test(allText);
+      const hasCross = allText.includes('✗') || /chưa\s*đúng|chưa\s*chính\s*xác|sai\s*rồi|not\s*quite\s*right|\bincorrect\b\s*(?:[\.!]|$)|chưa\s*phù\s*hợp/i.test(allText);
 
       if (hasOffTopicOrReject || hasRetryOrPartial || (hasCross && !isErrorQuestionContext) || forbidNum) {
         return { hasFeedback: true, result: 'INCORRECT', forbidNumerical: forbidNum, isOffTopic: hasOffTopicOrReject };
       }
 
-      const hasCheckmark = allText.includes('✓') || /đúng\s*rồi|quá\s*đỉnh|chính\s*xác\s*!|bạn\s*nắm\s*vững|câu\s*đúng\s*liên\s*tiếp|tiếp\s*tục\s*với\s*câu\s*hỏi\s*sau|correct/i.test(allText);
+      const hasCheckmark = allText.includes('✓') || /đúng\s*rồi|quá\s*đỉnh|chính\s*xác\s*!|bạn\s*nắm\s*vững|câu\s*đúng\s*liên\s*tiếp|tiếp\s*tục\s*với\s*câu\s*hỏi\s*sau|\bcorrect\b\s*(?:[\.!]|$)/i.test(allText);
 
       if (hasCheckmark) {
         return { hasFeedback: true, result: 'CORRECT', forbidNumerical: false };
@@ -5542,7 +5589,7 @@
         }
       }
 
-      if (candidate.questionText && candidate.questionText.length > 15) {
+      if (candidate.questionText && candidate.questionText.length > 15 && candidate.questionText.length >= combinedText.length) {
         combinedText = candidate.questionText;
       }
 
@@ -5739,10 +5786,14 @@
       const imgEls = container.querySelectorAll('img');
       for (const img of imgEls) {
         try {
-          const src = img.src || img.getAttribute('data-src') || '';
+          const src = img.currentSrc || img.src || img.getAttribute('data-src') || img.getAttribute('data-lazy-src') || img.getAttribute('data-original') || '';
           if (!src || seen.has(src)) continue;
-          if (img.complete && img.naturalWidth > 0 && (img.naturalWidth < 25 || img.naturalHeight < 25)) continue;
-          if (/avatar|icon|logo/i.test(src)) continue;
+          if (img.complete && img.naturalWidth > 0 && (img.naturalWidth < 16 || img.naturalHeight < 16)) continue;
+          const srcLow = src.toLowerCase();
+          if (srcLow.startsWith('http') && /[\/\-_.](?:avatar|icon|logo|emoji|badge)[\/\-_.]/i.test(srcLow)) continue;
+          const altCls = ((img.getAttribute('alt') || '') + ' ' + (typeof img.className === 'string' ? img.className : '')).toLowerCase();
+          if (/avatar|icon|logo|emoji|badge/.test(altCls)) continue;
+          if (img.closest && img.closest('[class*="avatar"], [class*="icon"], [class*="logo"]')) continue;
           seen.add(src);
 
           if (src.startsWith('data:')) {
@@ -6242,6 +6293,7 @@ CÁC QUY TẮC SỐNG CÒN BẮT BUỘC TUÂN THỦ:
    - TUYỆT ĐỐI CẤM lặp lại cùng một câu trả lời đã sai trước đó. Nếu câu trả lời có tính tương đồng về mặt khái niệm với đáp án thì chấp nhận, nhưng phải tối ưu để đạt độ chuẩn xác cao nhất theo SGK.
 ${langRules}
 3. CHỈ ĐẠO CHUYÊN MÔN THEO TỪNG MÔN HỌC (CHUẨN BỘ GIÁO DỤC VIỆT NAM):
+   - CHỈ ÁP DỤNG DUY NHẤT mục con của MÔN HỌC tương ứng với câu hỏi này; BỎ QUA hoàn toàn các mục môn khác để tránh nhiễu.
    - MÔN SINH HỌC (BIOLOGY):
      + Sử dụng 100% thuật ngữ chuẩn SGK Sinh học 10, 11, 12 mới: "nhiễm sắc thể tương đồng" (TUYỆT ĐỐI CẤM viết chữ Hán "đồng源"), "giảm phân", "nguyên phân", "nhân tố di truyền" (hoặc "alen"), "giao tử", "hợp tử", "quy luật phân ly", "phân ly độc lập", "liên kết gen", "hoán vị gen", "đột biến"...
      + Với câu hỏi nhận định, giải thích, cơ chế di truyền (tại sao, cơ chế, phân biệt, giới tính, màu sắc trứng tằm...): BẮT BUỘC trả lời bằng câu văn giải thích cơ chế sinh học theo chuẩn SGK (ví dụ: gene quy định tính trạng liên kết với nhiễm sắc thể giới tính), TUYỆT ĐỐI CẤM xuất ra con số thuần túy hay tỉ lệ phần trăm!
@@ -6286,14 +6338,16 @@ ${langRules}
        * Keo dán: Nhựa vá săm (cơ chế vật lý do bay hơi dung môi); Keo dán epoxy (cơ chế hóa học: phản ứng mở vòng giữa nhóm epoxy và chất đóng rắn amine tạo mạng lưới 3 chiều); Keo poly(urea-formaldehyde) (chất tham gia trực tiếp tạo mạng lưới polymer ba chiều là formaldehyde dư hoặc chất đóng rắn; acid chỉ đóng vai trò chất xúc tác thúc đẩy phản ứng).
        * Vật liệu composite: Gồm vật liệu cốt (sợi thủy tinh, sợi carbon, hạt) đóng vai trò chịu lực chính và vật liệu nền (polymer, kim loại, gốm ceramic) đóng vai trò liên kết, định hình, truyền lực và bảo vệ cốt. Khi chịu tải kéo 1 hướng, sợi cốt phải bố trí song song dọc theo hướng chịu lực chính.
      + Tuyệt đối phân biệt rõ chất xúc tác (chỉ làm tăng tốc độ phản ứng) với thành phần tham gia tạo cấu trúc mạng lưới polymer khi đề bài yêu cầu.
-4. ĐỊNH DẠNG ĐÁP ÁN:
-   - Nếu đề bài yêu cầu "Trả lời: [đáp án]" hoặc "Trả lời: ..." thì BẮT BUỘC chỉ xuất:
-     Trả lời: <nội dung đáp án cụ thể>
+4. ĐỊNH DẠNG ĐÁP ÁN (BẮT BUỘC TUYỆT ĐỐI):
+   - Toàn bộ quá trình suy luận, nháp, tính toán phải diễn ra ÂM THẦM trong đầu, TUYỆT ĐỐI KHÔNG xuất ra ngoài.
+   - Chỉ xuất DUY NHẤT 1 dòng cuối cùng: Trả lời: <nội dung đáp án cụ thể>
+   - TUYỆT ĐỐI KHÔNG viết bất kỳ chữ nào sau đáp án (không nhận xét, không chúc mừng, không hỏi thêm).
+   - Với câu trắc nghiệm / đúng-sai / điền từ / điền số: chỉ nêu đáp án gọn trong 1 dòng (tối đa 30 từ).
    - TUYỆT ĐỐI KHÔNG lặp lại lời nhận xét, lời khen của Bot hay lời mào đầu. Chỉ trả lời câu hỏi chuyên môn!
 5. ĐỐI VỚI CÂU HỎI NHIỀU Ý / YÊU CẦU ĐỦ SỐ LƯỢNG:
    - Nếu đề bài yêu cầu số lượng (ví dụ "liệt kê ba kỹ thuật", "mô tả ít nhất ba bước")... BẮT BUỘC phải trình bày ĐỦ và RÕ RÀNG từng ý (1., 2., 3.).
 6. CÂU HỎI TRẮC NGHIỆM / CHỌN ĐÁP ÁN:
-   - Chỉ xuất cụm từ cốt lõi hoặc chữ cái đáp án kèm nội dung ngắn gọn.`;
+   - Chỉ xuất cụm từ cốt lõi hoặc chữ cái đáp án kèm nội dung ngắn gọn. Chữ cái phương án (A/B/C/D) là BẮT BUỘC, không được thiếu.`;
 
       if (qd.lessonContext && qd.lessonContext.length > 20) {
         const cleanCtx = qd.lessonContext.replace(/data:image\/[a-zA-Z0-9+\-\.]+;base64,[A-Za-z0-9+/=]+/g, '').replace(/!\[.*?\]\([^\)]+\)/g, '');
@@ -6355,7 +6409,7 @@ LỊCH SỬ CÁC CÂU HỎI VỪA HOÀN THÀNH TRONG BÀI HỌC (tham khảo ti�
         } else {
           sys += `\n- Phân tích các phương án và chọn duy nhất 1 đáp án chính xác nhất.`;
         }
-        sys += `\n- BẮT BUỘC TRẢ LỜI THEO MẪU: "Trả lời: <chữ cái>) <nội dung phương án>" (ví dụ: Trả lời: D) Lệch bội hoặc Trả lời: A. ...).`;
+        sys += `\n- BẮT BUỘC TRẢ LỜI THEO MẪU DUY NHẤT: "Trả lời: <chữ cái>) <nội dung phương án ngắn gọn, tối đa 12 từ>" (ví dụ: Trả lời: D) Lệch bội). CHỮ CÁI PHƯƠNG ÁN LÀ BẮT BUỘC, không được thiếu.`;
       } else if (qd.questionType === 'TRUE_FALSE') {
         sys += `\n\n📌 CHỈ ĐẠO CHO DẠNG ĐÚNG / SAI:`;
         if (isRetrying && wrongList.length > 0) {
@@ -6432,8 +6486,27 @@ LỊCH SỬ CÁC CÂU HỎI VỪA HOÀN THÀNH TRONG BÀI HỌC (tham khảo ti�
         sys += `\n- Tính toán cẩn thận từng bước và xuất kết quả chính xác kèm đơn vị (nếu có).`;
       }
 
-      if (qd.botHint && qd.botHint.length > 5) {
+      if (qd.botHint && qd.botHint.length > 5 && qd.botHint !== STATE.lastBotFeedbackText) {
         sys += `\n\n💡 PHẢN HỒI & GỢI Ý ĐẶC BIỆT TỪ GIÁO VIÊN / BOT (CHÌA KHÓA TRỰC TIẾP CỦA ĐÁP ÁN):\n${qd.botHint}\n👉 BẮT BUỘC: Hãy bám sát và dùng chính xác gợi ý trên để đưa ra câu trả lời đầy đủ, hoàn chỉnh!`;
+      }
+
+      const subjectText = ((qd.text || '') + ' ' + (qd.lessonContext || '') + ' ' + (qd.bottomContext || '')).toLowerCase();
+      let subjectDirective = '';
+      if (/(?:\btoán\b|hình\s*học|đạo\s*hàm|tích\s*phân|phương\s*trình|xác\s*suất|tổ\s*hợp|logarit|tiệm\s*cận)/i.test(subjectText)) {
+        subjectDirective = 'Đây là câu hỏi môn TOÁN: kết quả phải là giá trị/số/phương trình cụ thể duy nhất (phân số dạng a/b, căn dạng sqrt(x)), KHÔNG giải thích dài dòng.';
+      } else if (/(?:vật\s*lí|vật\s*lý|nhiệt\s*động|lực|điện\s*tích|quang\s*học|sóng|dao\s*động|công\s*suất)/i.test(subjectText)) {
+        subjectDirective = 'Đây là câu hỏi môn VẬT LÍ: chú ý đúng đơn vị đo, đúng quy ước dấu (khối khí sinh công A < 0, tỏa nhiệt Q < 0), đáp án ngắn gọn kèm đơn vị nếu có.';
+      } else if (/(?:hóa\s*học|phản\s*ứng|dung\s*dịch|ester|polymer|trùng\s*hợp|trùng\s*ngưng|danh\s*pháp)/i.test(subjectText)) {
+        subjectDirective = 'Đây là câu hỏi môn HÓA HỌC: viết đúng công thức hóa học, đúng điều kiện phản ứng, dùng danh pháp IUPAC chuẩn SGK, đáp án ngắn gọn trực diện.';
+      } else if (/(?:sinh\s*học|di\s*truyền|nhiễm\s*sắc\s*thể|giảm\s*phân|nguyên\s*phân|alen|quần\s*thể|đột\s*biến)/i.test(subjectText)) {
+        subjectDirective = 'Đây là câu hỏi môn SINH HỌC: dùng đúng thuật ngữ SGK (không chèn tiếng Anh trong ngoặc), với câu hỏi cơ chế/giải thích BẮT BUỘC trả lời bằng câu văn phân tích cơ chế, TUYỆT ĐỐI không xuất số thuần túy.';
+      } else if (/(?:ngữ\s*văn|đọc\s*hiểu|biện\s*pháp\s*tu\s*từ|phương\s*thức\s*biểu\s*đạt|tác\s*phẩm|câu\s*thơ|đoạn\s*thơ)/i.test(subjectText)) {
+        subjectDirective = 'Đây là câu hỏi môn NGỮ VĂN: nêu đúng phương thức biểu đạt / biện pháp tu từ kèm tác dụng, viết cô đọng, đúng trọng tâm.';
+      } else if (/(?:lịch\s*sử|địa\s*lý|địa\s*lí|kinh\s*tế|văn\s*hóa|chiến\s*dịch|mốc\s*thời\s*gian|giai\s*đoạn)/i.test(subjectText)) {
+        subjectDirective = 'Đây là câu hỏi môn LỊCH SỬ / ĐỊA LÍ: nêu đúng mốc thời gian, sự kiện, đặc điểm chính; trả lời ngắn gọn theo ý 1., 2., 3. nếu đề yêu cầu nhiều ý.';
+      }
+      if (subjectDirective) {
+        sys += `\n\n🎯 TRỌNG TÂM MÔN HỌC (ĐỌC KỸ TRƯỚC KHI TRẢ LỜI):\n${subjectDirective}`;
       }
 
       sys += `\n\nNHẮC LẠI CÂU HỎI CẦN GIẢI:\n${actualQuestion}\n👉 BẮT BUỘC TRẢ LỜI NGAY ĐÁP ÁN CHO CÂU HỎI TRÊN:`;
@@ -6452,7 +6525,7 @@ LỊCH SỬ CÁC CÂU HỎI VỪA HOÀN THÀNH TRONG BÀI HỌC (tham khảo ti�
       /* Truong hop cau hoi co hinh anh: Chi gui anh va loi yeu cau giai bai, tuyet doi khong gui ma code UI rac */
       if (qd.images && qd.images.length > 0) {
         let p = 'Chào bạn, hãy quan sát kỹ toàn bộ đề bài và dữ liệu trong hình ảnh đính kèm ở trên để giải giúp mình nhé.\n';
-        if (effectiveHint && effectiveHint.length > 5) {
+        if (effectiveHint && effectiveHint.length > 5 && effectiveHint !== botFeedback) {
           p += 'Gợi ý của bài: ' + effectiveHint + '\n';
         }
         if (botFeedback && botFeedback.length > 5) {
@@ -6461,7 +6534,7 @@ LỊCH SỬ CÁC CÂU HỎI VỪA HOÀN THÀNH TRONG BÀI HỌC (tham khảo ti�
         if (wrongList.length > 0) {
           p += 'Các đáp án đã sai (không chọn lại): ' + wrongList.join(', ') + '\n';
         }
-        p += '\nYêu cầu: Hãy đưa ra đáp án ngắn gọn, chính xác theo mẫu: Trả lời: <đáp án>';
+        p += '\nYêu cầu: Suy luận âm thầm, chỉ xuất DUY NHẤT 1 dòng: Trả lời: <đáp án ngắn gọn>. Nếu là trắc nghiệm thì xuất chữ cái kèm nội dung phương án (ví dụ: Trả lời: D) Lệch bội). TUYỆT ĐỐI không viết gì thêm sau đáp án.';
         return p;
       }
 
@@ -6499,7 +6572,7 @@ LỊCH SỬ CÁC CÂU HỎI VỪA HOÀN THÀNH TRONG BÀI HỌC (tham khảo ti�
         if (botFeedback) {
           p += '📢 Thông báo báo sai của hệ thống: "' + botFeedback + '"\n\n';
         }
-        if (effectiveHint) {
+        if (effectiveHint && effectiveHint !== botFeedback) {
           p += '💡 Gợi ý định hướng: "' + effectiveHint + '"\n\n';
         }
         if (wrongList.length > 0) {
@@ -6507,18 +6580,30 @@ LỊCH SỬ CÁC CÂU HỎI VỪA HOÀN THÀNH TRONG BÀI HỌC (tham khảo ti�
         }
       } else {
         p += 'CÂU HỎI BÀI TẬP: ' + actualQuestion + '\n\n';
-        if (effectiveHint) {
+        if (effectiveHint && effectiveHint !== botFeedback) {
           p += '💡 Gợi ý bài học: ' + effectiveHint + '\n\n';
         }
       }
 
-      const persona = 'Bạn là học sinh THPT giỏi theo chương trình SGK mới của Bộ GD&ĐT Việt Nam. Hãy giải câu hỏi trên một cách ngắn gọn, súc tích, 100% tiếng Việt thuần túy, tuyệt đối KHÔNG dùng ký tự markdown hay định dạng rườm rà.\n';
-      let rule = 'Bắt buộc trả lời duy nhất 1 dòng theo mẫu: "Trả lời: <đáp án ngắn gọn>".';
+      const isEngQuestion = /tiếng\s*anh|english|grammar|vocabulary|closest\s*in\s*meaning|opposite\s*in\s*meaning|synonym|antonym|pronunciation|choose\s*the\s*(?:best|correct)/i.test(actualQuestion);
+      const persona = isEngQuestion
+        ? 'You are an excellent Vietnamese high-school student. Answer the question above in 100% natural English (no Vietnamese, no Chinese characters). Think silently, output ONLY the final answer, no markdown, no explanation.\n'
+        : 'Bạn là học sinh THPT giỏi theo chương trình SGK mới của Bộ GD&ĐT Việt Nam. Hãy giải câu hỏi trên một cách ngắn gọn, súc tích, 100% tiếng Việt thuần túy, suy nghĩ âm thầm và KHÔNG xuất lời giải ra ngoài; tuyệt đối KHÔNG dùng ký tự markdown hay định dạng rườm rà.\n';
+      let rule = 'Bắt buộc xuất DUY NHẤT 1 dòng cuối cùng theo mẫu: "Trả lời: <đáp án ngắn gọn>"; tuyệt đối không viết gì thêm sau đáp án.';
       if (isMCQ) {
-        rule = 'Bắt buộc trả lời theo mẫu: "Trả lời: <chữ cái>) <nội dung đáp án>".';
+        rule = 'Bắt buộc xuất DUY NHẤT 1 dòng theo mẫu: "Trả lời: <chữ cái>) <nội dung phương án ngắn gọn>" (ví dụ: Trả lời: D) Lệch bội). Chữ cái phương án là bắt buộc, không được thiếu.';
       }
 
       return persona + p + rule;
+    },
+
+    isRefusalOrJunkAnswer(text) {
+      if (!text || typeof text !== 'string') return true;
+      const t = text.trim();
+      if (t.length < 3) return true;
+      if (/^\s*(?:trả\s*lời|đáp\s*án|answer)\s*[:\-]?\s*$/i.test(t)) return true;
+      if (/là\s*một\s*mô\s*hình\s*ngôn\s*ngữ|không\s*được\s*thiết\s*kế\s*để\s*trợ\s*giúp|không\s*thể\s*hỗ\s*trợ\s*(?:nội\s*dung|yêu\s*cầu|việc)|as\s*a\s*language\s*model|i\s*cannot\s*assist|cannot\s*help\s*with\s*that|chính\s*sách\s*an\s*toàn|không\s*thể\s*trả\s*lời\s*(?:câu\s*hỏi|yêu\s*cầu)\s*này|vi\s*phạm\s*(?:chính\s*sách|nguyên\s*tắc)/i.test(t)) return true;
+      return false;
     },
 
     async solve(qd) {
@@ -6698,7 +6783,7 @@ LỊCH SỬ CÁC CÂU HỎI VỪA HOÀN THÀNH TRONG BÀI HỌC (tham khảo ti�
           log('AI', `🎯 [${provider}] Đang kiểm tra & giải bằng model (${mIdx + 1}/${cascade.length}): ${targetModel}...`);
           res = await this.solveViaAPI(qd, activeKey, targetModel);
 
-          if (res && res.answer && res.answer.trim()) {
+          if (res && res.answer && res.answer.trim() && !this.isRefusalOrJunkAnswer(res.answer)) {
             STATE.keyAttempts[activeKey] = 0;
             STATE.keyCooldowns[activeKey] = 0;
             STATE.selectedModel = targetModel;
@@ -6742,7 +6827,7 @@ LỊCH SỬ CÁC CÂU HỎI VỪA HOÀN THÀNH TRONG BÀI HỌC (tham khảo ti�
             log('AI', `⚠️ Lỗi dữ liệu ảnh (400) trên [${targetModel}]. Chuyển sang chế độ Text-Only...`, 'warn');
             STATE.stripImagesOnRetry = true;
             res = await this.solveViaAPI(qd, activeKey, targetModel);
-            if (res && res.answer && res.answer.trim()) {
+            if (res && res.answer && res.answer.trim() && !this.isRefusalOrJunkAnswer(res.answer)) {
               STATE.stripImagesOnRetry = false;
               STATE.selectedModel = targetModel;
               return res.answer.trim();
@@ -6843,7 +6928,7 @@ LỊCH SỬ CÁC CÂU HỎI VỪA HOÀN THÀNH TRONG BÀI HỌC (tham khảo ti�
         }
 
         const isLongQuestion = qd.text && (qd.text.includes('liệt kê') || qd.text.includes('mô tả') || qd.text.includes('ba kỹ thuật') || qd.text.includes('ba bước'));
-        const optimalTokens = isLongQuestion ? 1024 : 768;
+        const optimalTokens = isLongQuestion ? 1280 : 1024;
 
         const payload = {
           model: activeModel,
@@ -6948,9 +7033,12 @@ LỊCH SỬ CÁC CÂU HỎI VỪA HOÀN THÀNH TRONG BÀI HỌC (tham khảo ti�
       }
 
       const isLongQuestion = qd.text && (qd.text.includes('liệt kê') || qd.text.includes('mô tả') || qd.text.includes('ba kỹ thuật') || qd.text.includes('ba bước'));
-      const optimalTokens = isLongQuestion ? 1024 : 768;
+      const optimalTokens = isLongQuestion ? 1280 : 1024;
       const genConfig = { temperature: dynamicTemp, maxOutputTokens: optimalTokens };
-      if (activeModel.includes('thinking')) genConfig.thinkingConfig = { thinkingBudget: 0 };
+      if (activeModel.includes('thinking')) {
+        const needsReasoning = STATE.retryCount > 0 || /toán|phương\s*trình|chứng\s*minh|vật\s*lí|vật\s*lý|hóa|sinh\s*học|tính\s*toán|tích\s*phân|đạo\s*hàm/i.test(qd.text || '');
+        genConfig.thinkingConfig = { thinkingBudget: needsReasoning ? 512 : 0 };
+      }
 
       const payload = {
         contents: [{ role: 'user', parts }],
@@ -7075,7 +7163,7 @@ CÁC QUY TẮC SỐNG CÒN BẮT BUỘC TUÂN THỦ:
 XÁC NHẬN: Bạn đã hiểu rõ toàn bộ vai trò và quy tắc THPT trên chưa? Hãy xác nhận ngắn gọn để chúng ta bắt đầu giải bài tập!`;
     },
 
-    executeBridgeTurn(promptText, img, turn, maxTimeoutMs = 65000) {
+    executeBridgeTurn(promptText, img, turn, maxTimeoutMs = 65000, coreText = '', forceNew = false) {
       function computeSimpleHash(str) {
         let h = 0;
         for (let i = 0; i < str.length; i++) {
@@ -7085,6 +7173,7 @@ XÁC NHẬN: Bạn đã hiểu rõ toàn bộ vai trò và quy tắc THPT trên 
         return String(h);
       }
       const pHash = computeSimpleHash(promptText.trim());
+      const coreKey = coreText ? computeSimpleHash(coreText.slice(0, 4000)) : '';
 
       const reqId = generateUUID();
       const reqObj = {
@@ -7095,7 +7184,9 @@ XÁC NHẬN: Bạn đã hiểu rõ toàn bộ vai trò và quy tắc THPT trên 
         timestamp: Date.now(),
         prompt: promptText,
         imageBase64: img,
-        turn: turn
+        turn: turn,
+        coreKey: coreKey,
+        forceNew: !!forceNew
       };
       const reqJson = JSON.stringify(reqObj);
 
@@ -7289,14 +7380,36 @@ XÁC NHẬN: Bạn đã hiểu rõ toàn bộ vai trò và quy tắc THPT trên 
       STATE.isBridgeInFlight = true;
 
       try {
-        const now = Date.now();
-        const timeSinceLastTurn = now - (STATE.lastBridgeTurnTimestamp || 0);
-        if (timeSinceLastTurn < 3500) {
-          const waitMs = 3500 - timeSinceLastTurn;
-          log('BRIDGE', `⏳ Nhịp độ giải qua Bridge: Nghỉ ${Math.round(waitMs / 100) / 10}s chống spam tab Gemini...`);
+        const isRetryingTurn = STATE.retryCount > 0 || (STATE.wrongAnswers && STATE.wrongAnswers.length > 0);
+        const coreText = ((qd && (qd.questionText || qd.text)) || '').trim().replace(/\s+/g, ' ').toLowerCase();
+        STATE.bridgeRecentAnswers = STATE.bridgeRecentAnswers || [];
+        const recordBridgeAnswer = (ansText) => {
+          if (!ansText || coreText.length < 10) return;
+          STATE.bridgeRecentAnswers.push({ core: coreText, qText: (qd.questionText || qd.text || ''), answer: ansText, ts: Date.now() });
+          if (STATE.bridgeRecentAnswers.length > 6) STATE.bridgeRecentAnswers.shift();
+        };
+
+        const nowTs = Date.now();
+        if (!isRetryingTurn && coreText.length > 10 && domScraper.isSameQuestion) {
+          const qTextNow = qd.questionText || qd.text || '';
+          const hit = STATE.bridgeRecentAnswers.find(e => e && e.answer && (nowTs - e.ts) < 240000 && (e.core === coreText || domScraper.isSameQuestion(e.qText, qTextNow)));
+          if (hit) {
+            log('BRIDGE', '♻️ Đề bài này vừa được giải xong, dùng lại đáp án cũ để tránh gửi trùng lên tab Gemini.');
+            return hit.answer;
+          }
+        }
+
+        STATE.bridgeTurnHistory = (STATE.bridgeTurnHistory || []).filter(t => (nowTs - t) < 60000);
+        const burstGap = STATE.bridgeTurnHistory.length >= 4 ? 8000 : 3500;
+        const timeSinceLastTurn = nowTs - (STATE.lastBridgeTurnTimestamp || 0);
+        if (timeSinceLastTurn < burstGap) {
+          const waitMs = burstGap - timeSinceLastTurn;
+          log('BRIDGE', `⏳ Nhịp độ giải qua Bridge: Nghỉ ${Math.round(waitMs / 100) / 10}s chống spam tab Gemini${burstGap > 3500 ? ' (đang giãn nhịp chống dồn dập)' : ''}...`);
           await sleep(waitMs);
         }
         STATE.lastBridgeTurnTimestamp = Date.now();
+        STATE.bridgeTurnHistory.push(Date.now());
+        if (STATE.bridgeTurnHistory.length > 30) STATE.bridgeTurnHistory.shift();
 
         STATE.bridgeSessionPromptCount = (STATE.bridgeSessionPromptCount || 0) + 1;
         const promptText = this.buildCondensedBridgePrompt(qd);
@@ -7307,9 +7420,9 @@ XÁC NHẬN: Bạn đã hiểu rõ toàn bộ vai trò và quy tắc THPT trên 
         const img = qd.images?.[0] || null;
         log('BRIDGE', `🌉 Gửi đề bài qua Cross-Tab Bridge (Lượt #${STATE.bridgeSessionPromptCount}, ${img ? 'Kèm hình ảnh' : 'Chỉ văn bản'})...`);
 
-        const ans = await this.executeBridgeTurn(promptText, img, STATE.bridgeSessionPromptCount, 65000);
+        const ans = await this.executeBridgeTurn(promptText, img, STATE.bridgeSessionPromptCount, 65000, coreText, isRetryingTurn);
         if (ans) {
-          const isRefusal = /là\s*một\s*mô\s*hình\s*ngôn\s*ngữ|không\s*được\s*thiết\s*kế\s*để\s*trợ\s*giúp|không\s*thể\s*hỗ\s*trợ\s*(?:nội\s*dung|yêu\s*cầu)|as\s*a\s*language\s*model|i\s*cannot\s*assist|chính\s*sách\s*an\s*toàn/i.test(ans);
+          const isRefusal = this.isRefusalOrJunkAnswer(ans);
           if (isRefusal) {
             log('BRIDGE', '⚠️ Tab Gemini kích hoạt câu từ chối an toàn! Đang làm sạch đề bài và tự động thử lại lượt 2...', 'warn');
             const cleanQ = domScraper.cleanQuestionText ? domScraper.cleanQuestionText(qd.questionText || qd.text || '') : (qd.text || '');
@@ -7317,12 +7430,16 @@ XÁC NHẬN: Bạn đã hiểu rõ toàn bộ vai trò và quy tắc THPT trên 
             const retryAns = await this.executeBridgeTurn(fallbackPrompt, null, STATE.bridgeSessionPromptCount + 1, 45000);
             if (retryAns && !/mô\s*hình\s*ngôn\s*ngữ/i.test(retryAns)) {
               log('BRIDGE', `✅ Lượt 2 thử lại với đề sạch thành công: "${retryAns.substring(0, 80)}..."`);
+              recordBridgeAnswer(retryAns);
               return retryAns;
             }
             log('BRIDGE', '⚠️ Gemini vẫn từ chối do chính sách web, tự động chuyển sang Động cơ Free AI giải cứu...', 'warn');
-            return this.solveViaGogoDuck(qd);
+            const duckAns = await this.solveViaGogoDuck(qd);
+            if (duckAns) recordBridgeAnswer(duckAns);
+            return duckAns;
           }
           log('BRIDGE', `✅ Nhận đáp án từ tab Gemini: "${ans.substring(0, 80)}..."`);
+          recordBridgeAnswer(ans);
           return ans;
         }
 
@@ -7505,7 +7622,7 @@ XÁC NHẬN: Bạn đã hiểu rõ toàn bộ vai trò và quy tắc THPT trên 
 
       /* Tuyen 1: Pollinations AI sieu toc, khong token, khong gioi han */
       let ans = await this.callPollinationsAI(prompt, 'openai');
-      if (ans && ans.length > 2) {
+      if (ans && ans.length > 2 && !this.isRefusalOrJunkAnswer(ans)) {
         log('FREE_AI', `✅ Nhận đáp án từ Tuyến 1 Pollinations Free AI: "${ans.substring(0, 80)}..."`);
         return ans;
       }
@@ -7514,14 +7631,14 @@ XÁC NHẬN: Bạn đã hiểu rõ toàn bộ vai trò và quy tắc THPT trên 
       log('FREE_AI', '🔄 Tuyến 1 bận, chuyển sang Tuyến 2 DuckChat Fresh Session...', 'warn');
       STATE.duckVQD = null;
       ans = await this.callDuckChat(prompt, selectedModel);
-      if (ans && ans.length > 2) {
+      if (ans && ans.length > 2 && !this.isRefusalOrJunkAnswer(ans)) {
         log('FREE_AI', `✅ Nhận đáp án từ Tuyến 2 DuckChat Fresh AI: "${ans.substring(0, 80)}..."`);
         return ans;
       }
 
       /* Tuyen 3: Fallback thu lai Pollinations voi model mistral */
       ans = await this.callPollinationsAI(prompt, 'mistral');
-      if (ans && ans.length > 2) {
+      if (ans && ans.length > 2 && !this.isRefusalOrJunkAnswer(ans)) {
         log('FREE_AI', `✅ Nhận đáp án từ Tuyến 3 Pollinations Mistral: "${ans.substring(0, 80)}..."`);
         return ans;
       }
@@ -7702,7 +7819,7 @@ XÁC NHẬN: Bạn đã hiểu rõ toàn bộ vai trò và quy tắc THPT trên 
         } else {
           data = { ...STATE.currentQuestion };
           data.botFeedback = STATE.lastBotFeedbackText;
-          data.botHint = STATE.lastBotFeedbackText;
+          data.botHint = STATE.lastBotHintText || '';
           data.retryCount = STATE.retryCount;
           log('VISION', `🔄 [Tự sửa sai]: Giữ nguyên câu hỏi gốc (${data.text.length} ký tự) & tiếp thu nhận xét mới từ AI Web`);
         }
@@ -7713,6 +7830,14 @@ XÁC NHẬN: Bạn đã hiểu rõ toàn bộ vai trò và quy tắc THPT trên 
         log('VISION', '❌ Không trích xuất được câu hỏi hợp lệ (nội dung đang tải hoặc đang phân tích)', 'warn');
         this.transition(FSM_STATE.IDLE);
         return;
+      }
+      const prevQText = (STATE.currentQuestion && STATE.currentQuestion.text) || '';
+      const isNewQ = !prevQText || (domScraper.isSameQuestion ? !domScraper.isSameQuestion(prevQText, data.text) : prevQText !== data.text);
+      if (isNewQ) {
+        STATE.wrongAnswers = [];
+        STATE.lastBotFeedbackText = '';
+        STATE.lastBotHintText = '';
+        if (STATE.retryCount > 0) STATE.retryCount = 0;
       }
       STATE.currentQuestion = data;
       this.transition(FSM_STATE.SOLVING);
@@ -7938,6 +8063,36 @@ XÁC NHẬN: Bạn đã hiểu rõ toàn bộ vai trò và quy tắc THPT trên 
       }
 
       cleanA = cleanA.replace(/^(\s*(?:Trả\s*lời|Đáp\s*án|Answer|Result)[\s:]+)+/i, '').trim();
+
+      const isMCQQuestion = qd && (qd.isMCQ || qd.questionType === 'MULTIPLE_CHOICE' || /(?:^|\n)\s*[A-D][\.\:\)]\s+\S/.test(qdText));
+      if (isMCQQuestion && cleanA && !/^(?:sẵn\s*sàng|ready|ok|tiếp\s*tục)$/i.test(cleanA.trim())) {
+        const letterMatch = cleanA.match(/^\s*\(?\s*([A-Da-d])\s*[\)\.\:\-]\s*([\s\S]*)$/);
+        const bareLetterMatch = cleanA.match(/^\s*\(?\s*([A-Da-d])\s*\)?\s*$/);
+        if (letterMatch) {
+          let mcqBody = letterMatch[2].trim();
+          if (mcqBody.length > 200) {
+            const cutIdx = mcqBody.search(/[\.;]\s/);
+            if (cutIdx > 20) mcqBody = mcqBody.substring(0, cutIdx).trim();
+          }
+          cleanA = letterMatch[1].toUpperCase() + ') ' + mcqBody;
+        } else if (bareLetterMatch) {
+          cleanA = bareLetterMatch[1].toUpperCase() + ')';
+        } else if (cleanA.length > 25) {
+          const optionRe = /(?:^|\n)\s*([A-D])[\)\.\:]\s*([^\n]{2,120})/g;
+          let om = null;
+          while ((om = optionRe.exec(qdText)) !== null) {
+            const optBody = om[2].trim();
+            if (optBody.length >= 8) {
+              const probe = optBody.substring(0, Math.min(24, optBody.length)).toLowerCase();
+              if (cleanA.toLowerCase().includes(probe)) {
+                cleanA = om[1].toUpperCase() + ') ' + optBody;
+                break;
+              }
+            }
+          }
+        }
+      }
+
       if (/^(?:sẵn\s*sàng|ready|ok|tiếp\s*tục)$/i.test(cleanA.trim())) {
         cleanA = 'Sẵn sàng';
       } else {
@@ -8021,6 +8176,9 @@ XÁC NHẬN: Bạn đã hiểu rõ toàn bộ vai trò và quy tắc THPT trên 
 
         if (STATE.currentQuestion && STATE.currentAnswer) {
           questionCache.set(STATE.currentQuestion.text, STATE.currentAnswer);
+          if (STATE.currentQuestion.questionText && STATE.currentQuestion.questionText !== STATE.currentQuestion.text) {
+            questionCache.set(STATE.currentQuestion.questionText, STATE.currentAnswer);
+          }
         }
         this.transition(FSM_STATE.IDLE);
         setTimeout(() => domScraper.checkForNewContent(), 400);
