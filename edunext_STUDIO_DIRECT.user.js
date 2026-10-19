@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         EdUnExT_STUDIO_DIRECT
 // @namespace    https://edunext.fpt.edu.vn/
-// @version      3.2.0
+// @version      3.3.0
 // @description  EdUnExT STUDIO Edition — AUTO Giải edunext bản prenium + Kho đáp án tự học & Kho chung (tự học đáp án đúng, chia sẻ qua GitHub resourcepack, gặp lại trả ngay 0 token)
 // @author       BroAmStuck Studio
 // @updateURL    https://raw.githubusercontent.com/anhtuantran0512-cyber/Edunext_fe/main/edunext_STUDIO_DIRECT.user.js
@@ -11089,6 +11089,9 @@ body {
     const NET_KEY = 'EDUNEXT_STUDIO_SHARED_NET_v1';
     const NET_FAIL_MAX = 3;
     const NET_COOL_MS = 10 * 60 * 1000;
+    const BLOCK_KEY = 'EDUNEXT_STUDIO_SHARED_BLOCK_v1';
+    const BLOCK_MAX = 300;
+    const BLOCK_TTL_MS = 30 * 24 * 60 * 60 * 1000;
     let MAX_ITEMS = 800;
     let TTL_MS = 365 * 24 * 60 * 60 * 1000;
 
@@ -11116,6 +11119,7 @@ body {
     const shFetches = {};
     const shFailed = {};
     let net = { n: 0, until: 0 };
+    let shBlock = {};
 
     const rawGet = (k) => {
       try { if (typeof GM_getValue === 'function') return GM_getValue(k, ''); } catch (_) {}
@@ -11183,18 +11187,18 @@ body {
       } catch (_) {}
       return out;
     };
-    const hex2 = (x) => (x < 16 ? '0' : '') + x.toString(16);
-    const shardIdOf = (key) => {
+    const hash8 = (s) => {
       let h = 0x811c9dc5;
       try {
-        const s = String(key || '');
-        for (let i = 0; i < s.length; i++) {
-          h ^= s.charCodeAt(i);
+        const t = String(s || '');
+        for (let i = 0; i < t.length; i++) {
+          h ^= t.charCodeAt(i);
           h = Math.imul(h, 0x01000193) >>> 0;
         }
       } catch (_) {}
-      return hex2((h >>> 0) & 255);
+      return ('00000000' + (h >>> 0).toString(16)).slice(-8);
     };
+    const shardIdOf = (key) => hash8(key).slice(-2);
     const timeAgo = (t) => {
       try {
         const d = Date.now() - (t || 0);
@@ -11234,6 +11238,39 @@ body {
           netSave();
         }
       } catch (_) {}
+    };
+
+    const saveBlock = () => { try { rawSet(BLOCK_KEY, JSON.stringify(shBlock)); } catch (_) {} };
+    const blockPrune = () => {
+      try {
+        const now = Date.now();
+        Object.keys(shBlock).forEach((k) => {
+          const e = shBlock[k];
+          if (!e || (now - (e.t || 0)) > BLOCK_TTL_MS) delete shBlock[k];
+        });
+        const ks = Object.keys(shBlock);
+        if (ks.length > BLOCK_MAX) {
+          ks.sort((a, b) => ((shBlock[a] || {}).t || 0) - ((shBlock[b] || {}).t || 0));
+          const cut = ks.length - BLOCK_MAX;
+          for (let i = 0; i < cut; i++) delete shBlock[ks[i]];
+        }
+      } catch (_) {}
+    };
+    const blockAdd = (k, a) => {
+      try {
+        if (!k) return;
+        shBlock[k] = { h: hash8(substance(a)), t: Date.now() };
+        blockPrune();
+        saveBlock();
+      } catch (_) {}
+    };
+    const blockHas = (k, a) => {
+      try {
+        const e = k ? shBlock[k] : null;
+        if (!e) return false;
+        if ((Date.now() - (e.t || 0)) > BLOCK_TTL_MS) { delete shBlock[k]; return false; }
+        return e.h === hash8(substance(a));
+      } catch (_) { return false; }
     };
 
     const httpGetJson = (url) => new Promise((resolve) => {
@@ -11375,6 +11412,13 @@ body {
       shFetches[id] = p;
       return p;
     };
+    const sharedHitIn = (p, k) => {
+      try {
+        if (!p || !p.items) return false;
+        const a = sanitizeSharedItem(p.items[k]);
+        return !!(a && !blockHas(k, a));
+      } catch (_) { return false; }
+    };
     const sharedLookup = (key, qText) => {
       try {
         if (!shOn || !key) return null;
@@ -11384,6 +11428,7 @@ body {
         const it = pack.items[key];
         const ans = sanitizeSharedItem(it);
         if (!ans) return null;
+        if (blockHas(key, ans)) return null;
         shShared = { k: key, a: ans, t: Date.now() };
         meta.shHits = (meta.shHits || 0) + 1;
         saveSoon();
@@ -11406,8 +11451,8 @@ body {
         const inner = loadIndex(false).then((idx) => {
           if (!idx || !idx.have || !idx.have[id]) return false;
           if (shFailed[id]) return false;
-          if (shFetches[id]) return shFetches[id].then((p) => !!(p && p.items && p.items[k]), () => false);
-          return fetchShard(id).then((p) => !!(p && p.items && p.items[k]), () => false);
+          if (shFetches[id]) return shFetches[id].then((p) => sharedHitIn(p, k), () => false);
+          return fetchShard(id).then((p) => sharedHitIn(p, k), () => false);
         });
         return withBudget(inner, budgetMs || SHARED_WAIT_MS);
       } catch (_) { return Promise.resolve(false); }
@@ -11630,52 +11675,81 @@ body {
       } catch (_) {}
     };
 
+    const sharedCachedAns = (k) => {
+      try {
+        const pack = readShard(shardIdOf(k));
+        const it = pack && pack.items ? pack.items[k] : null;
+        return sanitizeSharedItem(it) || '';
+      } catch (_) { return ''; }
+    };
+    const addFeedback = (k, a) => {
+      try {
+        const fbk = shOut.fb || (shOut.fb = {});
+        const cur = fbk[k];
+        fbk[k] = { a: a, t: Date.now(), c: ((cur && cur.c) || 0) + 1 };
+        outboxTrim();
+        saveOutboxSoon();
+        log('BANK', '📡 Đã ghi phản hồi lên KHO CHUNG: đáp án này vừa bị chấm SAI — sẽ được rà soát khi gom kho.', 'warn');
+      } catch (_) {}
+    };
     const punish = (qText) => {
       try {
         const k = keyOf(qText);
         if (!k) return;
-        let acted = false;
+        let goneAns = '';
         if (items[k]) {
-          const gone = snippet(cleanAns(items[k].a), 70);
+          goneAns = items[k].a;
+          const gone = snippet(cleanAns(goneAns), 70);
           delete items[k];
           meta.pun = (meta.pun || 0) + 1;
           lastPun = gone;
           saveSoon();
-          acted = true;
           log('BANK', '🗑 Đáp án này bị chấm SAI — đã xoá khỏi kho để không bao giờ tái sử dụng: "' + gone + '"', 'warn');
         }
-        if (shOn && shShared && shShared.k === k && (Date.now() - shShared.t) < 30 * 60 * 1000) {
-          const fbk = shOut.fb || (shOut.fb = {});
-          const cur = fbk[k];
-          fbk[k] = { a: shShared.a, t: Date.now(), c: ((cur && cur.c) || 0) + 1 };
-          saveOutboxSoon();
-          refreshPanel();
-          log('BANK', '📡 Đã ghi phản hồi: đáp án vừa dùng từ KHO CHUNG bị chấm SAI — sẽ được rà soát khi gom kho.', 'warn');
-        } else if (acted) {
-          refreshPanel();
+        if (goneAns) {
+          try {
+            const oit = shOut.items[k];
+            if (oit && substance(oit.a) === substance(goneAns)) {
+              delete shOut.items[k];
+              saveOutboxSoon();
+              log('BANK', '🧹 Đáp án vừa bị chấm sai đã được rút khỏi hộp gửi đóng góp (không gửi lên kho chung).', 'warn');
+            }
+          } catch (_) {}
         }
+        let fbAns = '';
+        if (goneAns) {
+          const sca = sharedCachedAns(k);
+          if (sca && substance(sca) === substance(goneAns)) fbAns = sca;
+        }
+        if (!fbAns && shShared && shShared.k === k && (Date.now() - shShared.t) < 30 * 60 * 1000) fbAns = shShared.a;
+        if (fbAns) {
+          blockAdd(k, fbAns);
+          if (shOn) addFeedback(k, fbAns);
+        }
+        if (goneAns || fbAns) refreshPanel();
       } catch (_) {}
     };
 
+    const normCmp = (s) => {
+      try { return String(s || '').normalize('NFC').replace(/\u00a0/g, ' ').replace(/\s+/g, ' ').trim().toLowerCase(); } catch (_) { return String(s || '').toLowerCase(); }
+    };
     const hardenAns = (ans, qText) => {
       try {
         const m = String(ans || '').replace(/^Trả\s*lời\s*:\s*/i, '').match(/^\s*\(?\s*([A-Da-d])\s*[\)\.\:\-]\s*([^\n]{2,150})\s*$/);
         if (!m) return ans;
         const oldLetter = m[1].toUpperCase();
-        const body = m[2].trim();
-        if (body.length < 4) return ans;
+        const nb = normCmp(m[2]);
+        if (nb.length < 4) return ans;
+        const probe = nb.slice(0, 24);
         const optRe = /(?:^|\n)\s*([A-D])[\)\.\:\-]\s*([^\n]{2,150})/g;
         const opts = [];
         let o = null;
         while ((o = optRe.exec(String(qText || ''))) !== null) opts.push({ l: o[1].toUpperCase(), b: o[2].trim() });
         if (opts.length < 2) return ans;
-        const probe = body.substring(0, Math.min(24, body.length)).toLowerCase();
-        const byLetter = opts.find((x) => x.l === oldLetter);
-        if (byLetter && byLetter.b.toLowerCase().includes(probe)) return ans;
-        const hit = opts.find((x) => x.b.length >= 4 && x.b.toLowerCase().includes(probe));
-        if (hit && hit.l !== oldLetter) {
-          log('BANK', '🔀 Phát hiện hoán vị phương án — tự chuyển đáp án kho sang ' + hit.l + ') đúng theo nội dung.');
-          return hit.l + ') ' + hit.b;
+        const matches = opts.filter((x) => { const t = normCmp(x.b); return t.length >= 4 && t.indexOf(probe) !== -1; });
+        if (matches.length === 1 && matches[0].l !== oldLetter) {
+          log('BANK', '🔀 Phát hiện hoán vị phương án — tự chuyển đáp án kho sang ' + matches[0].l + ') đúng theo nội dung.');
+          return matches[0].l + ') ' + matches[0].b;
         }
         return ans;
       } catch (_) { return ans; }
@@ -11751,13 +11825,15 @@ body {
       let add = 0; let upd = 0; let skip = 0;
       Object.keys(p.items).forEach((k) => {
         const it = p.items[k];
-        if (!k || !it || typeof it.a !== 'string' || !it.a.trim()) { skip++; return; }
+        const a = sanitizeSharedItem(it);
+        if (!k || !a) { skip++; return; }
+        const n = Math.max(0, Math.min(9999, Number(it.n) || 0));
         const cur = items[k];
         if (!cur) {
-          items[k] = { a: it.a, t: it.t || Date.now(), n: it.n || 0, q: snippet(it.q || '', 110) };
+          items[k] = { a: a, t: it.t || Date.now(), n: n, q: snippet(it.q || '', 110) };
           add++;
         } else if ((it.t || 0) > (cur.t || 0)) {
-          cur.a = it.a; cur.t = it.t || Date.now(); cur.n = Math.max(cur.n || 0, it.n || 0);
+          cur.a = a; cur.t = it.t || Date.now(); cur.n = Math.max(cur.n || 0, n);
           upd++;
         } else { skip++; }
       });
@@ -11843,6 +11919,13 @@ body {
             if (pn && typeof pn === 'object') net = { n: pn.n || 0, until: pn.until || 0 };
           }
         } catch (_) { net = { n: 0, until: 0 }; }
+        try {
+          const braw = rawGet(BLOCK_KEY);
+          if (braw) {
+            const pb = JSON.parse(braw);
+            if (pb && typeof pb === 'object' && !Array.isArray(pb)) shBlock = pb;
+          }
+        } catch (_) { shBlock = {}; }
       } catch (_) {
         items = {};
         meta = { hits: 0, pun: 0, shHits: 0 };
@@ -11937,7 +12020,9 @@ body {
           fetchShard: fetchShard,
           readShard: readShard,
           contrib: buildContrib,
-          idxCache: readIdxCache
+          idxCache: readIdxCache,
+          blocks: () => Object.keys(shBlock).length,
+          unblock: () => { try { shBlock = {}; saveBlock(); refreshPanel(); } catch (_) {} }
         }
       };
     } catch (_) {}
