@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         EdUnExT_STUDIO_DIRECT
 // @namespace    https://edunext.fpt.edu.vn/
-// @version      3.4.0
+// @version      3.5.0
 // @description  EdUnExT STUDIO Edition — AUTO Giải edunext bản prenium + Kho đáp án tự học & Kho chung (tự học đáp án đúng, chia sẻ qua GitHub resourcepack, gặp lại trả ngay 0 token)
 // @author       BroAmStuck Studio
 // @updateURL    https://raw.githubusercontent.com/anhtuantran0512-cyber/Edunext_fe/main/edunext_STUDIO_DIRECT.user.js
@@ -11084,6 +11084,7 @@ body {
     const SHARD_TTL_MS = 10 * 24 * 60 * 60 * 1000;
     const HTTP_TIMEOUT_MS = 9000;
     const MAX_ANS_LEN = 6000;
+    const MAX_ALT = 3;
     const MAX_SHARDS = 96;
     const MAX_OUT_ITEMS = 1000;
     const NET_KEY = 'EDUNEXT_STUDIO_SHARED_NET_v1';
@@ -11182,7 +11183,7 @@ body {
           const it = srcItems[k];
           const a = sanitizeSharedItem(it);
           if (!a || !k) return;
-          out[k] = { a: a, t: Number(it.t) || 0, n: Number(it.n) || 0, q: snippet(it.q || '', 110) };
+          out[k] = { a: a, t: Number(it.t) || 0, n: Number(it.n) || 0, d: Math.max(0, Math.floor(Number(it.d) || 0)), q: snippet(it.q || '', 110) };
         });
       } catch (_) {}
       return out;
@@ -11468,7 +11469,7 @@ body {
         meta.shHits = (meta.shHits || 0) + 1;
         saveSoon();
         refreshPanel();
-        log('BANK', '📡 [KHO CHUNG] Trúng đáp án dùng chung (' + ((it && it.n) || 1) + ' lượt xác nhận): "' + snippet(cleanAns(ans), 80) + '"');
+        log('BANK', '📡 [KHO CHUNG] Trúng đáp án dùng chung (' + ((it && it.n) || 1) + ' lượt xác nhận' + ((it && it.d) > 1 ? ' · ' + it.d + ' nguồn độc lập' : '') + '): "' + snippet(cleanAns(ans), 80) + '"');
         return ans;
       } catch (_) { return null; }
     };
@@ -11542,8 +11543,21 @@ body {
         return Math.max(0, after - before);
       } catch (_) { return 0; }
     };
+    const srcTag = () => {
+      try {
+        const KEY = 'EDUNEXT_STUDIO_DEVICE_TAG_v1';
+        let t = rawGet(KEY);
+        if (t && /^[0-9a-f]{8,16}$/.test(t)) return t;
+        let seed = '';
+        try { seed = [navigator.userAgent || '', navigator.language || '', screen.width || 0, screen.height || 0, new Date().getTimezoneOffset() || 0].join('|'); } catch (_) {}
+        t = hash8(seed + '|' + Date.now() + '|' + Math.random());
+        try { rawSet(KEY, t); } catch (_) {}
+        return t;
+      } catch (_) { return ''; }
+    };
     const buildContrib = () => ({
-      app: 'EdUnExT_STUDIO', kind: 'bank-contrib', v: 1,
+      app: 'EdUnExT_STUDIO', kind: 'bank-contrib', v: 2,
+      src: srcTag(),
       exportedAt: new Date().toISOString(),
       count: Object.keys(shOut.items || {}).length,
       fbCount: Object.keys(shOut.fb || {}).length,
@@ -12058,6 +12072,13 @@ body {
           wait: sharedWait,
           lookup: sharedLookup,
           shardId: shardIdOf,
+          trust: (k) => {
+            try {
+              const pack = readShard(shardIdOf(k));
+              const it = pack && pack.items ? pack.items[k] : null;
+              return it ? { d: Number(it.d) || 1, n: Number(it.n) || 1 } : null;
+            } catch (_) { return null; }
+          },
           index: (f) => loadIndex(!!f),
           fetchShard: fetchShard,
           readShard: readShard,
