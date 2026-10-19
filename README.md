@@ -40,6 +40,7 @@ Bản ULTRA và free quên đáp án sau vài ngày; bản STUDIO_DIRECT mở h�
 - **Xuất / nhập để chia sẻ:** trong GUI, mở mục "📚 Kho Đáp Án Tự Học" có nút Xuất kho (ra file JSON), Nhập kho (gộp từ file của máy khác, tự giữ bản mới hơn) và Xoá kho. Có nút bật/tắt ON/OFF kèm thống kê: đã lưu bao nhiêu câu, trúng kho bao nhiêu lượt.
 - **Kho chung (từ v3.1.0):** gặp câu chưa có trên máy, script tự tra **kho đáp án dùng chung** trên GitHub (`resourcepack/edunext_bank`) *trước khi* gọi AI — máy nào từng chấm đúng một lần là máy khác dùng lại được, không tốn token của ai. Kho được nuôi bằng nút "📡 Đóng góp": xuất file các câu đã chấm CHÍNH XÁC trên máy bạn để gửi gom — chỉ có khoá câu hỏi + đáp án + số lượt xác nhận, không tài khoản, không danh tính. Nút "🌐 Kho chung: ON/OFF" để tắt hẳn nếu không dùng.
 - **Chống đáp án rác ở kho chung:** chỉ nhận đáp án từ file đóng góp của client (đã được Edunext chấm CHÍNH XÁC); đáp án lệch nội dung bị đánh dấu xung đột chứ không tự ghi đè; đáp án kho chung bị chấm sai sẽ gửi kèm phiếu phản hồi và tự bị loại khi số lần sai vượt số lần xác nhận.
+- **Cứng hoá & bền mạng (v3.2.0):** mọi đáp án đọc từ kho chung đều bị **lọc 2 tầng** (quá dài / dính marker bản quyền / ký tự điều khiển đều bị chặn — kể cả shard cache cũ). Mạng chập 3 lần liên tiếp → script **tạm nghỉ tra kho 10 phút** để không làm chậm việc giải bài (bấm dòng "📡 Kho chung" để thử lại ngay). Bấm "📡 Đóng góp" giờ gửi **trọn kho máy** (kể cả câu học từ bản cũ), không cần chờ học câu mới.
 
 ## Cài đặt
 
