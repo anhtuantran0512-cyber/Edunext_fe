@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         EdUnExT_STUDIO_DIRECT
 // @namespace    https://edunext.fpt.edu.vn/
-// @version      3.3.0
+// @version      3.4.0
 // @description  EdUnExT STUDIO Edition — AUTO Giải edunext bản prenium + Kho đáp án tự học & Kho chung (tự học đáp án đúng, chia sẻ qua GitHub resourcepack, gặp lại trả ngay 0 token)
 // @author       BroAmStuck Studio
 // @updateURL    https://raw.githubusercontent.com/anhtuantran0512-cyber/Edunext_fe/main/edunext_STUDIO_DIRECT.user.js
@@ -11163,7 +11163,7 @@ body {
       try {
         const m = String(s || '').trim().match(/^\(?\s*([A-Da-d])\s*[\)\.\:\-]\s*([\s\S]{1,600})$/);
         const body = m ? m[2] : String(s || '');
-        return body.replace(/\s+/g, ' ').trim().toLowerCase();
+        return body.normalize('NFC').replace(/\s+/g, ' ').trim().toLowerCase();
       } catch (_) { return ''; }
     };
     const sanitizeSharedItem = (it) => {
@@ -11407,10 +11407,42 @@ body {
           return pack;
         }
         shFailed[id] = 1;
+        try {
+          const pk = readShard(id);
+          if (pk) dropStaleShard(id, pk);
+        } catch (_) {}
         return null;
       });
       shFetches[id] = p;
       return p;
+    };
+    const shardState = (id, pack) => {
+      try {
+        if (!pack || !shIdx || !shIdx.updatedAt) return 'keep';
+        if (String(pack.v || '') === String(shIdx.updatedAt)) return 'keep';
+        if (!shIdx.have || !shIdx.have[id]) return (!pack.v || String(pack.v) < String(shIdx.updatedAt)) ? 'gone' : 'keep';
+        return 'stale';
+      } catch (_) { return 'keep'; }
+    };
+    const dropStaleShard = (id, pack) => {
+      try {
+        if (!pack || shardState(id, pack) !== 'gone') return;
+        delete shMem[id];
+        try { rawDel(shardKeyOf(id)); } catch (_) {}
+        try {
+          let ring = [];
+          try { ring = JSON.parse(rawGet(SHARD_RING_KEY) || '[]') || []; } catch (_) { ring = []; }
+          ring = ring.filter((x) => !(x && x.id === id));
+          rawSet(SHARD_RING_KEY, JSON.stringify(ring));
+        } catch (_) {}
+        log('BANK', '🧹 Kho chung: shard này đã bị dọn khỏi kho sau khi gom phản hồi — xoá cache cũ trên máy.');
+      } catch (_) {}
+    };
+    const shardKick = (id) => {
+      try {
+        if (shFetches[id] || shFailed[id] || netCooling()) return;
+        fetchShard(id);
+      } catch (_) {}
     };
     const sharedHitIn = (p, k) => {
       try {
@@ -11425,6 +11457,9 @@ body {
         const id = shardIdOf(key);
         const pack = readShard(id);
         if (!pack || !pack.items) return null;
+        const st = shardState(id, pack);
+        if (st === 'gone') { dropStaleShard(id, pack); return null; }
+        if (st === 'stale') shardKick(id);
         const it = pack.items[key];
         const ans = sanitizeSharedItem(it);
         if (!ans) return null;
@@ -11445,11 +11480,15 @@ body {
         if (!k) return Promise.resolve(false);
         const id = shardIdOf(k);
         const pack = readShard(id);
-        if (pack && pack.items && pack.items[k]) return Promise.resolve(false);
-        if (pack && shIdx && shIdx.updatedAt && String(pack.v || '') === String(shIdx.updatedAt)) return Promise.resolve(false);
+        const st = shardState(id, pack);
+        if (st === 'keep') {
+          if (pack && pack.items && pack.items[k]) return Promise.resolve(false);
+          if (pack && shIdx && shIdx.updatedAt) return Promise.resolve(false);
+        }
         if (shFailed[id]) return Promise.resolve(false);
         const inner = loadIndex(false).then((idx) => {
-          if (!idx || !idx.have || !idx.have[id]) return false;
+          if (!idx) return false;
+          if (!idx.have || !idx.have[id]) { dropStaleShard(id, pack); return false; }
           if (shFailed[id]) return false;
           if (shFetches[id]) return shFetches[id].then((p) => sharedHitIn(p, k), () => false);
           return fetchShard(id).then((p) => sharedHitIn(p, k), () => false);
@@ -11564,6 +11603,8 @@ body {
         else if (shIdx) shTxt = shIdx.total + ' câu chia sẻ · cập nhật ' + (shIdx.updatedAt ? timeAgo(Date.parse(shIdx.updatedAt) || shIdxAt) : timeAgo(shIdxAt)) + ((meta.shHits || 0) > 0 ? ' · đã trúng ' + meta.shHits + ' lượt' : '');
         else shTxt = 'chưa kết nối (bấm dòng này để tải danh mục)';
         if (shOn && netCooling()) shTxt += ' · ⏸ mạng chập, tạm nghỉ tra (bấm để thử lại ngay)';
+        const nBlk = Object.keys(shBlock).length;
+        if (shOn && nBlk > 0) shTxt += ' · 🚫 đang chặn ' + nBlk + ' đáp án từng bị chấm sai';
         setTxt('#sbShTxt', shTxt);
         const tg = $('#sbToggle');
         if (tg) {
@@ -12000,6 +12041,7 @@ body {
         punish: punish,
         keyOf: keyOf,
         harden: hardenAns,
+        sub: substance,
         merge: mergePayload,
         setEnabled: setEnabled,
         reload: load,
