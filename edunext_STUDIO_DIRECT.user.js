@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         EdUnExT_STUDIO_DIRECT
 // @namespace    https://edunext.fpt.edu.vn/
-// @version      2.2.7
-// @description  AUTO Giải edunext bản prenium
+// @version      3.0.0
+// @description  EdUnExT STUDIO Edition — AUTO Giải edunext bản prenium + Kho đáp án tự học (tự học đáp án đúng, xuất/nhập kho chia sẻ)
 // @author       BroAmStuck Studio
 // @updateURL    https://raw.githubusercontent.com/anhtuantran0512-cyber/Edunext_fe/main/edunext_STUDIO_DIRECT.user.js
 // @downloadURL  https://raw.githubusercontent.com/anhtuantran0512-cyber/Edunext_fe/main/edunext_STUDIO_DIRECT.user.js
@@ -11060,5 +11060,397 @@ body {
     else setTimeout(launch, 1500);
   }
 
+/* ================================================================================================= */
+/* ===== __STUDIO_ANSWER_BANK_BEGIN__ · Kho Đáp Án Tự Học — module độc quyền EdUnExT_STUDIO_DIRECT ===== */
+/* ===== Tự học đáp án đã được chấm CHÍNH XÁC · gặp lại trả ngay 0 token · xuất/nhập file chia sẻ  ===== */
+/* ================================================================================================= */
+(() => {
+  'use strict';
+  try {
+    if (typeof questionCache === 'undefined' || !questionCache) return;
+    if (questionCache.__sbWrapped) return;
+    questionCache.__sbWrapped = true;
+
+    const BANK_KEY = 'EDUNEXT_STUDIO_ANSWER_BANK_v1';
+    const ON_KEY = 'EDUNEXT_STUDIO_BANK_ENABLED';
+    const MAX_ANS_LEN = 6000;
+    let MAX_ITEMS = 800;
+    let TTL_MS = 365 * 24 * 60 * 60 * 1000;
+
+    let enabled = true;
+    let items = {};
+    let meta = { hits: 0, pun: 0 };
+    let lastLearn = '';
+    let lastHit = '';
+    let lastPun = '';
+    let saveTimer = null;
+
+    const rawGet = (k) => {
+      try { if (typeof GM_getValue === 'function') return GM_getValue(k, ''); } catch (_) {}
+      try { return localStorage.getItem('SBANK::' + k) || ''; } catch (_) { return ''; }
+    };
+    const rawSet = (k, v) => {
+      try { if (typeof GM_setValue === 'function') { GM_setValue(k, v); return; } } catch (_) {}
+      try { localStorage.setItem('SBANK::' + k, v); } catch (_) {}
+    };
+    const persist = () => {
+      try { rawSet(BANK_KEY, JSON.stringify({ v: 1, items: items, meta: meta })); } catch (_) {}
+    };
+    const saveSoon = () => {
+      if (saveTimer) { try { clearTimeout(saveTimer); } catch (_) {} }
+      saveTimer = setTimeout(() => { saveTimer = null; persist(); }, 350);
+    };
+
+    const serialize = (q) => {
+      try {
+        return String(q || '').split('\n').filter((line) => !/^\s*\(?[A-D][\)\.\:\-]\s+\S/.test(line)).join('\n');
+      } catch (_) { return String(q || ''); }
+    };
+    const keyOf = (q) => {
+      let n = '';
+      try { n = questionCache._norm(serialize(q)) || ''; } catch (_) { n = ''; }
+      if (!n || n.length < 15) return '';
+      return n + '#' + n.length;
+    };
+
+    const cleanAns = (s) => String(s || '').replace(/^Trả\s*lời\s*:\s*/i, '').trim();
+    const snippet = (s, n) => {
+      const t = String(s || '').replace(/\s+/g, ' ').trim();
+      return t.length > n ? t.slice(0, n - 1) + '…' : t;
+    };
+
+    const refreshPanel = () => {
+      try {
+        const s = STATE && STATE.shadowRoot;
+        if (!s) return;
+        if (!s.querySelector('#sbSec')) { injectPanel(); return; }
+        const $ = (sel) => s.querySelector(sel);
+        const cnt = Object.keys(items).length;
+        const setTxt = (sel, v) => { const el = $(sel); if (el) el.textContent = v; };
+        setTxt('#sbCount', cnt + ' câu');
+        setTxt('#sbStSaved', String(cnt));
+        setTxt('#sbStHits', String(meta.hits || 0));
+        setTxt('#sbStPun', String(meta.pun || 0));
+        const tg = $('#sbToggle');
+        if (tg) {
+          tg.textContent = enabled ? 'ON' : 'OFF';
+          if (enabled) tg.classList.add('on'); else tg.classList.remove('on');
+        }
+        let last = '';
+        if (lastHit) last += '📚 Vừa trúng: "' + lastHit + '"';
+        if (lastPun) last += (last ? ' · ' : '') + '🗑 Vừa xoá: "' + lastPun + '"';
+        if (lastLearn) last += (last ? ' · ' : '') + '🧠 Vừa học: "' + lastLearn + '"';
+        setTxt('#sbLast', last || 'Chưa có dữ liệu — kho tự học khi bài được chấm CHÍNH XÁC, lần sau gặp lại sẽ trả ngay.');
+      } catch (_) {}
+    };
+
+    const injectPanel = () => {
+      try {
+        const s = STATE.shadowRoot;
+        if (!s || s.querySelector('#sbSec')) return;
+        const exp = s.querySelector('.exp');
+        if (!exp) return;
+        const sec = document.createElement('div');
+        sec.className = 'sec';
+        sec.id = 'sbSec';
+        sec.innerHTML = `
+          <div class="sec-t" id="sbHead" style="cursor:pointer;display:flex;align-items:center;justify-content:space-between;gap:8px">
+            <span class="sec-t-main">📚 Kho Đáp Án Tự Học <span style="opacity:.6;font-weight:600;font-size:9.5px">STUDIO</span></span>
+            <span style="display:flex;align-items:center;gap:7px;flex-shrink:0">
+              <span id="sbCount" style="font-size:9.5px;color:#94a3b8;font-weight:700">0 câu</span>
+              <span class="sb-chev" id="sbChev">▸</span>
+            </span>
+          </div>
+          <div id="sbBody" style="display:none">
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin:2px 0 8px">
+              <span style="font-size:9.5px;color:#94a3b8;line-height:1.55">Kho tự học khi bài được chấm CHÍNH XÁC — gặp lại trả ngay (0 token). Lưu trên máy bạn, xuất file được để chia sẻ.</span>
+              <button class="btn btn-a on" id="sbToggle" style="padding:3px 10px;flex-shrink:0">ON</button>
+            </div>
+            <div class="stats" style="margin-bottom:8px">
+              <div class="stat"><div class="stat-v" id="sbStSaved">0</div><div class="stat-l">Đã Lưu</div></div>
+              <div class="stat"><div class="stat-v" id="sbStHits">0</div><div class="stat-l">Lượt Trúng</div></div>
+              <div class="stat"><div class="stat-v" id="sbStPun">0</div><div class="stat-l">Đã Xoá</div></div>
+            </div>
+            <div id="sbLast" style="font-size:9.5px;color:#94a3b8;line-height:1.55;margin-bottom:8px;word-break:break-word">Chưa có dữ liệu.</div>
+            <div style="display:flex;gap:6px;flex-wrap:wrap">
+              <button class="btn btn-f" id="sbExport" title="Tải kho ra file JSON để cất giữ hoặc chia sẻ">📤 Xuất kho</button>
+              <button class="btn btn-f" id="sbImport" title="Nhập kho từ file JSON đã xuất (tự gộp, giữ bản mới hơn)">📥 Nhập kho</button>
+              <button class="btn btn-k" id="sbClear" title="Xoá toàn bộ kho trên máy này">🗑 Xoá kho</button>
+            </div>
+            <input type="file" id="sbFile" accept=".json,application/json" style="display:none">
+          </div>`;
+        const anchor = exp.querySelector('#sS');
+        const anchorSec = anchor ? anchor.closest('.sec') : null;
+        const footer = exp.querySelector('.exp-footer');
+        if (anchorSec && anchorSec.parentNode === exp) anchorSec.insertAdjacentElement('afterend', sec);
+        else if (footer) exp.insertBefore(sec, footer);
+        else exp.appendChild(sec);
+        if (!s.querySelector('#sbStyle')) {
+          const st = document.createElement('style');
+          st.id = 'sbStyle';
+          st.textContent = '.tg-BANK{color:#facc15;font-weight:800}.sb-chev{font-size:9.5px;color:#94a3b8;font-weight:700}';
+          s.appendChild(st);
+        }
+        const $ = (sel) => s.querySelector(sel);
+        const head = $('#sbHead');
+        if (head) head.addEventListener('click', () => {
+          const b = $('#sbBody'); const c = $('#sbChev');
+          if (!b) return;
+          const open = b.style.display !== 'none';
+          b.style.display = open ? 'none' : 'block';
+          if (c) c.textContent = open ? '▸' : '▾';
+        });
+        const tg = $('#sbToggle'); if (tg) tg.addEventListener('click', () => { setEnabled(!enabled); });
+        const bx = $('#sbExport'); if (bx) bx.addEventListener('click', () => { doExport(); });
+        const bi = $('#sbImport'); const bf = $('#sbFile');
+        if (bi && bf) bi.addEventListener('click', () => { bf.click(); });
+        if (bf) bf.addEventListener('change', () => {
+          try { doImportFile(bf.files && bf.files[0]); } catch (_) {}
+          try { bf.value = ''; } catch (_) {}
+        });
+        const bc = $('#sbClear'); if (bc) bc.addEventListener('click', () => { doClear(); });
+        refreshPanel();
+      } catch (_) {}
+    };
+
+    const learn = (qText, ans) => {
+      try {
+        if (!enabled || !qText || typeof ans !== 'string' || !ans.trim()) return;
+        if (ans.length > MAX_ANS_LEN) return;
+        if (ans.indexOf('[CẢNH BÁO BẢN QUYỀN') !== -1) return;
+        const k = keyOf(qText);
+        if (!k) return;
+        const prev = items[k];
+        items[k] = { a: ans, t: Date.now(), n: prev ? (prev.n || 0) : 0, q: snippet(qText, 110) };
+        lastLearn = snippet(cleanAns(ans), 80);
+        evict();
+        saveSoon();
+        refreshPanel();
+        log('BANK', '🧠 Đã ghi vào kho đáp án STUDIO: "' + lastLearn + '"');
+      } catch (_) {}
+    };
+
+    const punish = (qText) => {
+      try {
+        const k = keyOf(qText);
+        if (!k || !items[k]) return;
+        const gone = snippet(cleanAns(items[k].a), 70);
+        delete items[k];
+        meta.pun = (meta.pun || 0) + 1;
+        lastPun = gone;
+        saveSoon();
+        refreshPanel();
+        log('BANK', '🗑 Đáp án này bị chấm SAI — đã xoá khỏi kho để không bao giờ tái sử dụng: "' + gone + '"', 'warn');
+      } catch (_) {}
+    };
+
+    const hardenAns = (ans, qText) => {
+      try {
+        const m = String(ans || '').replace(/^Trả\s*lời\s*:\s*/i, '').match(/^\s*\(?\s*([A-Da-d])\s*[\)\.\:\-]\s*([^\n]{2,150})\s*$/);
+        if (!m) return ans;
+        const oldLetter = m[1].toUpperCase();
+        const body = m[2].trim();
+        if (body.length < 4) return ans;
+        const optRe = /(?:^|\n)\s*([A-D])[\)\.\:\-]\s*([^\n]{2,150})/g;
+        const opts = [];
+        let o = null;
+        while ((o = optRe.exec(String(qText || ''))) !== null) opts.push({ l: o[1].toUpperCase(), b: o[2].trim() });
+        if (opts.length < 2) return ans;
+        const probe = body.substring(0, Math.min(24, body.length)).toLowerCase();
+        const byLetter = opts.find((x) => x.l === oldLetter);
+        if (byLetter && byLetter.b.toLowerCase().includes(probe)) return ans;
+        const hit = opts.find((x) => x.b.length >= 4 && x.b.toLowerCase().includes(probe));
+        if (hit && hit.l !== oldLetter) {
+          log('BANK', '🔀 Phát hiện hoán vị phương án — tự chuyển đáp án kho sang ' + hit.l + ') đúng theo nội dung.');
+          return hit.l + ') ' + hit.b;
+        }
+        return ans;
+      } catch (_) { return ans; }
+    };
+
+    const bankGet = (qText) => {
+      try {
+        if (!enabled) return null;
+        const k = keyOf(qText);
+        if (!k) return null;
+        const it = items[k];
+        if (!it || !it.a) return null;
+        if (TTL_MS > 0 && Date.now() - (it.t || 0) > TTL_MS) { delete items[k]; saveSoon(); return null; }
+        it.n = (it.n || 0) + 1;
+        it.t = Date.now();
+        meta.hits = (meta.hits || 0) + 1;
+        lastHit = snippet(cleanAns(it.a), 80);
+        saveSoon();
+        refreshPanel();
+        log('BANK', '📚 [KHO ĐÁP ÁN STUDIO] Trúng kho! Tái dùng đáp án đã từng được chấm CHÍNH XÁC (lần thứ ' + it.n + ', 0 token): "' + lastHit + '"');
+        return hardenAns(it.a, qText);
+      } catch (_) { return null; }
+    };
+
+    const evict = () => {
+      try {
+        const keys = Object.keys(items);
+        if (keys.length <= MAX_ITEMS) return;
+        keys.sort((a, b) => (items[a].t || 0) - (items[b].t || 0));
+        const cut = keys.length - MAX_ITEMS;
+        for (let i = 0; i < cut; i++) delete items[keys[i]];
+      } catch (_) {}
+    };
+
+    const buildPayload = () => ({
+      app: 'EdUnExT_STUDIO', kind: 'answer-bank', v: 1,
+      exportedAt: new Date().toISOString(),
+      count: Object.keys(items).length,
+      items: items
+    });
+
+    const doExport = () => {
+      try {
+        const payload = buildPayload();
+        const blob = new Blob([JSON.stringify(payload, null, 1)], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const pad = (x) => (x < 10 ? '0' : '') + x;
+        const d = new Date();
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'Kho-Dap-An-STUDIO_' + d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()) + '_' + pad(d.getHours()) + pad(d.getMinutes()) + '.json';
+        a.style.display = 'none';
+        (document.body || document.documentElement).appendChild(a);
+        a.click();
+        setTimeout(() => { try { a.remove(); } catch (_) {} try { URL.revokeObjectURL(url); } catch (_) {} }, 4000);
+        log('BANK', '📤 Đã xuất kho đáp án STUDIO ra file JSON (' + payload.count + ' câu). Cất file để chia sẻ hoặc mang sang máy khác.');
+      } catch (e) {
+        log('BANK', '❌ Xuất kho thất bại: ' + (e && e.message ? e.message : e), 'error');
+      }
+    };
+
+    const mergePayload = (p) => {
+      if (!p || typeof p !== 'object' || !p.items || typeof p.items !== 'object') {
+        throw new Error('File không đúng định dạng kho đáp án STUDIO.');
+      }
+      let add = 0; let upd = 0; let skip = 0;
+      Object.keys(p.items).forEach((k) => {
+        const it = p.items[k];
+        if (!k || !it || typeof it.a !== 'string' || !it.a.trim()) { skip++; return; }
+        const cur = items[k];
+        if (!cur) {
+          items[k] = { a: it.a, t: it.t || Date.now(), n: it.n || 0, q: snippet(it.q || '', 110) };
+          add++;
+        } else if ((it.t || 0) > (cur.t || 0)) {
+          cur.a = it.a; cur.t = it.t || Date.now(); cur.n = Math.max(cur.n || 0, it.n || 0);
+          upd++;
+        } else { skip++; }
+      });
+      evict();
+      saveSoon();
+      refreshPanel();
+      return { add: add, upd: upd, skip: skip, total: Object.keys(items).length };
+    };
+
+    const doImportFile = (file) => {
+      if (!file) return;
+      const rd = new FileReader();
+      rd.onload = () => {
+        try {
+          const r = mergePayload(JSON.parse(String(rd.result || '{}')));
+          log('BANK', '✅ Nhập kho xong: +' + r.add + ' câu mới, ' + r.upd + ' cập nhật, ' + r.skip + ' bỏ qua. Tổng kho: ' + r.total + ' câu.');
+        } catch (e) {
+          log('BANK', '❌ Nhập kho thất bại: ' + (e && e.message ? e.message : e), 'error');
+        }
+      };
+      rd.onerror = () => log('BANK', '❌ Không đọc được file nhập kho.', 'error');
+      rd.readAsText(file);
+    };
+
+    const doClear = () => {
+      try {
+        if (!confirm('Xoá toàn bộ kho đáp án STUDIO trên máy này? (Các file bạn đã xuất không bị ảnh hưởng)')) return;
+        items = {};
+        meta = { hits: 0, pun: 0 };
+        lastLearn = ''; lastHit = ''; lastPun = '';
+        persist();
+        refreshPanel();
+        log('BANK', '🗑 Đã xoá sạch kho đáp án STUDIO trên máy này.');
+      } catch (_) {}
+    };
+
+    const setEnabled = (v, quiet) => {
+      enabled = !!v;
+      try { rawSet(ON_KEY, enabled ? '1' : '0'); } catch (_) {}
+      refreshPanel();
+      if (!quiet) log('BANK', enabled ? '✅ Kho đáp án STUDIO: BẬT (tự học + tái sử dụng đáp án đúng).' : '⏸ Kho đáp án STUDIO: TẮT (không học, không tái sử dụng).');
+    };
+
+    const load = () => {
+      try {
+        const raw = rawGet(BANK_KEY);
+        if (raw) {
+          const p = JSON.parse(raw);
+          if (p && typeof p === 'object' && p.items && typeof p.items === 'object') {
+            items = p.items;
+            if (p.meta && typeof p.meta === 'object') meta = { hits: p.meta.hits || 0, pun: p.meta.pun || 0 };
+          }
+        }
+        const onRaw = rawGet(ON_KEY);
+        enabled = (onRaw === '' ? '1' : onRaw) !== '0';
+      } catch (_) {
+        items = {};
+        meta = { hits: 0, pun: 0 };
+        try { log('BANK', '⚠️ Kho đáp án cũ bị hỏng định dạng — đã khởi tạo lại kho rỗng.', 'warn'); } catch (__) {}
+      }
+    };
+
+    const origGet = questionCache.get;
+    const origSet = questionCache.set;
+    const origDel = questionCache.delete;
+    questionCache.get = function (qText) {
+      let r = null;
+      try { r = origGet.call(questionCache, qText); } catch (_) {}
+      if (r) return r;
+      return bankGet(qText);
+    };
+    questionCache.set = function (qText, ans) {
+      try { origSet.call(questionCache, qText, ans); } catch (_) {}
+      try { learn(qText, ans); } catch (_) {}
+    };
+    questionCache.delete = function (qText) {
+      try { origDel.call(questionCache, qText); } catch (_) {}
+      try { punish(qText); } catch (_) {}
+    };
+
+    const origBuildGUI = buildGUI;
+    buildGUI = function () {
+      const r = origBuildGUI.apply(this, arguments);
+      try { injectPanel(); } catch (_) {}
+      return r;
+    };
+    const origUpdateStats = updateStats;
+    updateStats = function () {
+      try { origUpdateStats.apply(this, arguments); } catch (_) {}
+      try { refreshPanel(); } catch (_) {}
+    };
+
+    load();
+    try {
+      window.__EDUNEXT_SBANK__ = {
+        state: () => ({ enabled: enabled, items: items, meta: meta }),
+        get: bankGet,
+        learn: learn,
+        punish: punish,
+        keyOf: keyOf,
+        harden: hardenAns,
+        merge: mergePayload,
+        setEnabled: setEnabled,
+        reload: load,
+        refresh: refreshPanel,
+        payload: buildPayload
+      };
+    } catch (_) {}
+    log('BANK', '📚 Kho đáp án tự học STUDIO: ' + (enabled ? 'BẬT' : 'TẮT') + ' • đã nạp ' + Object.keys(items).length + ' câu từ máy.');
+  } catch (e) {
+    try { log('BANK', '⚠️ Kho đáp án STUDIO gặp lỗi khởi động (bỏ qua, script vẫn chạy bình thường): ' + (e && e.message ? e.message : e), 'warn'); } catch (_) {}
+  }
+})();
+/* ===== __STUDIO_ANSWER_BANK_END__ ===== */
   init();
 })();
