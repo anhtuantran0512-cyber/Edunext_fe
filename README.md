@@ -23,11 +23,21 @@ Script chạy y như mình làm bài, theo đúng thứ tự:
 
 4. **Đọc kết quả.** Đúng thì đi tiếp câu sau. Sai thì script lấy nhận xét của giáo viên gửi lại cho AI để xin đáp án mới, chỉ thử lại số lần giới hạn chứ không thử mãi. Nó nhớ dai: danh sách đáp án đã bị chấm sai và lời phê của giáo viên được giữ nguyên xuyên suốt các lần sửa, và trước khi nộp lại còn có chốt chặn — đáp án nào lặp lại đáp án sai cũ sẽ bị chặn ngay: cho AI giải lại một lần kèm tối hậu thư; nếu vẫn lì thì tự đảo Đúng/Sai, xoay sang phương án trắc nghiệm chưa thử, hoặc tạm dừng để bạn xem tay — thay vì nộp lặp làm phí lượt. Sai tới 2 lần thì script tự leo thang: nếu đang mở tab Gemini, nó nhờ thẳng Gemini giải cứu câu đó. Câu số liệu hoặc câu đang sửa bài còn được "kiểm chéo" bằng một tuyến AI độc lập — hai bên ra kết quả lệch nhau thì ưu tiên bên mạnh hơn.
 
-5. **Chống hỏi trùng & nhịp như người thật (đỡ spam tab Gemini).** Đề giống nhau hoặc vừa giải xong sẽ được trả bằng đáp án cũ trong vài phút thay vì hỏi lại AI. Nhiều câu dồn dập quá thì script tự giãn nhịp gửi. Nếu tab Gemini không trả lời sau 3 lần thử, script tự dừng để khỏi gửi lặp vô hạn. Lúc nộp bài, script cũng dừng 1-3 giây "đọc lại" trước khi bấm nộp (bài viết dài dừng lâu hơn) và giữ khoảng cách tối thiểu 7 giây giữa hai lần nộp — trông tự nhiên như người bấm thật.
+5. **Chống hỏi trùng & nhịp như người thật (đỡ spam tab Gemini).** Đề giống nhau hoặc vừa giải xong sẽ được trả bằng đáp án cũ trong vài phút thay vì hỏi lại AI. Nhiều câu dồn dập quá thì script tự giãn nhịp gửi. Nếu tab Gemini không trả lời sau 3 lần thử, script tự dừng để khỏi gửi lặp vô hạn. Lúc nộp bài, script cũng dừng 1-3 giây "đọc lại" trước khi bấm nộp (bài viết dài dừng lâu hơn) và giữ khoảng cách tối thiểu 7 giây giữa hai lần nộp — trông tự nhiên như người bấm thật. Bản STUDIO_DIRECT còn có thêm "Kho đáp án tự học" nhớ đáp án đúng lâu dài để khỏi tốn token — xem mục "Bản STUDIO_DIRECT có gì riêng?" bên dưới.
 
 6. **Sổ tay ôn tập.** Bật trong GUI: script tự gom câu hỏi và lời giải vào "đề cương", xuất ra file Word (.docx) hoặc Markdown (.md), kèm file log (.json) để xem lại.
 
 7. **Ngoài ra.** Nộp xong có thông báo trên máy tính (nếu bạn cho phép quyền thông báo); hết bài thì tự chuyển bài học tiếp theo và báo "hoàn thành buổi học".
+
+## Bản STUDIO_DIRECT có gì riêng? — Kho Đáp Án Tự Học
+
+Bản ULTRA và free quên đáp án sau vài ngày; bản STUDIO_DIRECT mở hẳn một cuốn kho riêng:
+
+- **Tự học:** bài được chấm CHÍNH XÁC là câu hỏi + đáp án tự chui vào kho lưu trên máy bạn (không gửi đi đâu cả).
+- **Trả ngay lần sau:** gặp lại đúng câu đó, script lấy đáp án từ kho mà trả — không tốn token, không cần AI.
+- **Đề xáo phương án?** Kho tự dò nội dung phương án và chỉnh lại chữ cái cho khớp, không nộp nhầm.
+- **Tự thanh lọc:** đáp án nào bị chấm sai thì bị xoá khỏi kho ngay, không bao giờ tái sử dụng lại; mỗi câu chỉ giữ tối đa 1 năm, kho quá 800 câu thì tự dọn câu cũ nhất.
+- **Xuất / nhập để chia sẻ:** trong GUI, mở mục "📚 Kho Đáp Án Tự Học" có nút Xuất kho (ra file JSON), Nhập kho (gộp từ file của máy khác, tự giữ bản mới hơn) và Xoá kho. Có nút bật/tắt ON/OFF kèm thống kê: đã lưu bao nhiêu câu, trúng kho bao nhiêu lượt.
 
 ## Cài đặt
 
@@ -36,7 +46,7 @@ Script chạy y như mình làm bài, theo đúng thứ tự:
 - Cài extension Tampermonkey, nhớ bật Developer mode (chế độ nhà phát triển) cho extension.
 - Mở link cài của bản muốn dùng, Tampermonkey hiện trang xác nhận, bấm Install:
   - `edunext_ULTRA.user.js` — bản chính: [cài đặt](https://raw.githubusercontent.com/anhtuantran0512-cyber/Edunext_fe/main/edunext_ULTRA.user.js)
-  - `edunext_STUDIO_DIRECT.user.js` — bản phát cho kênh của BroAmStuck Studio: [cài đặt](https://raw.githubusercontent.com/anhtuantran0512-cyber/Edunext_fe/main/edunext_STUDIO_DIRECT.user.js)
+  - `edunext_STUDIO_DIRECT.user.js` — bản phát cho kênh của BroAmStuck Studio, kèm **Kho đáp án tự học**: [cài đặt](https://raw.githubusercontent.com/anhtuantran0512-cyber/Edunext_fe/main/edunext_STUDIO_DIRECT.user.js)
   - `edunext_free.user.js` — bản free (xem quy tắc bên dưới): [cài đặt](https://raw.githubusercontent.com/anhtuantran0512-cyber/Edunext_fe/main/edunext_free.user.js)
 
 **Cách 2 — Dán vào Console (không cần cài gì):**
