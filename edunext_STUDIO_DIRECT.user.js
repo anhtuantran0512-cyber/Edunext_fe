@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         EdUnExT_STUDIO_DIRECT
 // @namespace    https://edunext.fpt.edu.vn/
-// @version      3.0.0
-// @description  EdUnExT STUDIO Edition — AUTO Giải edunext bản prenium + Kho đáp án tự học (tự học đáp án đúng, xuất/nhập kho chia sẻ)
+// @version      3.1.0
+// @description  EdUnExT STUDIO Edition — AUTO Giải edunext bản prenium + Kho đáp án tự học & Kho chung (tự học đáp án đúng, chia sẻ qua GitHub resourcepack, gặp lại trả ngay 0 token)
 // @author       BroAmStuck Studio
 // @updateURL    https://raw.githubusercontent.com/anhtuantran0512-cyber/Edunext_fe/main/edunext_STUDIO_DIRECT.user.js
 // @downloadURL  https://raw.githubusercontent.com/anhtuantran0512-cyber/Edunext_fe/main/edunext_STUDIO_DIRECT.user.js
@@ -11061,8 +11061,8 @@ body {
   }
 
 /* ================================================================================================= */
-/* ===== __STUDIO_ANSWER_BANK_BEGIN__ · Kho Đáp Án Tự Học — module độc quyền EdUnExT_STUDIO_DIRECT ===== */
-/* ===== Tự học đáp án đã được chấm CHÍNH XÁC · gặp lại trả ngay 0 token · xuất/nhập file chia sẻ  ===== */
+/* ===== __STUDIO_ANSWER_BANK_BEGIN__ · Kho Đáp Án Tự Học + Kho Chung — module độc quyền EdUnExT_STUDIO_DIRECT ===== */
+/* ===== Tự học đáp án đã được chấm CHÍNH XÁC · gặp lại trả ngay 0 token · kho chung qua resourcepack GitHub ===== */
 /* ================================================================================================= */
 (() => {
   'use strict';
@@ -11073,17 +11073,45 @@ body {
 
     const BANK_KEY = 'EDUNEXT_STUDIO_ANSWER_BANK_v1';
     const ON_KEY = 'EDUNEXT_STUDIO_BANK_ENABLED';
+    const SHARED_ON_KEY = 'EDUNEXT_STUDIO_SHARED_ENABLED';
+    const SHARED_IDX_KEY = 'EDUNEXT_STUDIO_SHARED_INDEX_v1';
+    const SHARD_RING_KEY = 'EDUNEXT_STUDIO_SHARD_RING';
+    const OUTBOX_KEY = 'EDUNEXT_STUDIO_BANK_OUTBOX_v1';
+    const SHARED_REPO = 'anhtuantran0512-cyber/resourcepack';
+    const SHARED_DIR = 'edunext_bank';
+    const SHARED_WAIT_MS = 1800;
+    const IDX_TTL_MS = 3 * 60 * 60 * 1000;
+    const SHARD_TTL_MS = 10 * 24 * 60 * 60 * 1000;
+    const HTTP_TIMEOUT_MS = 9000;
     const MAX_ANS_LEN = 6000;
+    const MAX_SHARDS = 96;
+    const MAX_OUT_ITEMS = 600;
     let MAX_ITEMS = 800;
     let TTL_MS = 365 * 24 * 60 * 60 * 1000;
 
+    const SHARED_SRCS = [
+      'https://raw.githubusercontent.com/' + SHARED_REPO + '/main/' + SHARED_DIR + '/',
+      'https://cdn.jsdelivr.net/gh/' + SHARED_REPO + '@main/' + SHARED_DIR + '/'
+    ];
+
     let enabled = true;
     let items = {};
-    let meta = { hits: 0, pun: 0 };
+    let meta = { hits: 0, pun: 0, shHits: 0 };
     let lastLearn = '';
     let lastHit = '';
     let lastPun = '';
     let saveTimer = null;
+
+    let shOn = true;
+    let shIdx = null;
+    let shIdxAt = 0;
+    let shIdxPromise = null;
+    let shOut = { items: {}, fb: {} };
+    let shOutTimer = null;
+    let shShared = null;
+    const shMem = {};
+    const shFetches = {};
+    const shFailed = {};
 
     const rawGet = (k) => {
       try { if (typeof GM_getValue === 'function') return GM_getValue(k, ''); } catch (_) {}
@@ -11092,6 +11120,11 @@ body {
     const rawSet = (k, v) => {
       try { if (typeof GM_setValue === 'function') { GM_setValue(k, v); return; } } catch (_) {}
       try { localStorage.setItem('SBANK::' + k, v); } catch (_) {}
+    };
+    const rawDel = (k) => {
+      try { if (typeof GM_deleteValue === 'function') { GM_deleteValue(k); return; } } catch (_) {}
+      try { if (typeof GM_setValue === 'function') { GM_setValue(k, ''); return; } } catch (_) {}
+      try { localStorage.removeItem('SBANK::' + k); } catch (_) {}
     };
     const persist = () => {
       try { rawSet(BANK_KEY, JSON.stringify({ v: 1, items: items, meta: meta })); } catch (_) {}
@@ -11118,6 +11151,289 @@ body {
       const t = String(s || '').replace(/\s+/g, ' ').trim();
       return t.length > n ? t.slice(0, n - 1) + '…' : t;
     };
+    const substance = (s) => {
+      try {
+        const m = String(s || '').trim().match(/^\(?\s*([A-Da-d])\s*[\)\.\:\-]\s*([\s\S]{1,600})$/);
+        const body = m ? m[2] : String(s || '');
+        return body.replace(/\s+/g, ' ').trim().toLowerCase();
+      } catch (_) { return ''; }
+    };
+    const hex2 = (x) => (x < 16 ? '0' : '') + x.toString(16);
+    const shardIdOf = (key) => {
+      let h = 0x811c9dc5;
+      try {
+        const s = String(key || '');
+        for (let i = 0; i < s.length; i++) {
+          h ^= s.charCodeAt(i);
+          h = Math.imul(h, 0x01000193) >>> 0;
+        }
+      } catch (_) {}
+      return hex2((h >>> 0) & 255);
+    };
+    const timeAgo = (t) => {
+      try {
+        const d = Date.now() - (t || 0);
+        if (!t || d < 0) return 'vừa xong';
+        if (d < 60000) return 'vừa xong';
+        if (d < 3600000) return Math.floor(d / 60000) + ' phút trước';
+        if (d < 86400000) return Math.floor(d / 3600000) + ' giờ trước';
+        return Math.floor(d / 86400000) + ' ngày trước';
+      } catch (_) { return ''; }
+    };
+
+    const withBudget = (p, ms) => new Promise((resolve) => {
+      let done = false;
+      const fin = (v) => {
+        if (done) return;
+        done = true;
+        try { clearTimeout(to); } catch (_) {}
+        resolve(v);
+      };
+      const to = setTimeout(() => fin(false), ms);
+      try { p.then((v) => fin(v), () => fin(false)); } catch (_) { fin(false); }
+    });
+
+    const httpGetJson = (url) => new Promise((resolve) => {
+      let done = false;
+      const fin = (v) => { if (!done) { done = true; resolve(v); } };
+      try {
+        if (typeof GM_xmlhttpRequest === 'function') {
+          GM_xmlhttpRequest({
+            method: 'GET',
+            url: url,
+            timeout: HTTP_TIMEOUT_MS,
+            onload: (r) => {
+              let v = null;
+              try { if (r && r.status >= 200 && r.status < 300) v = JSON.parse(r.responseText); } catch (_) {}
+              fin(v);
+            },
+            onerror: () => fin(null),
+            ontimeout: () => fin(null),
+            onabort: () => fin(null)
+          });
+          return;
+        }
+      } catch (_) {}
+      try {
+        if (typeof fetch === 'function') {
+          fetch(url).then((r) => (r && r.ok ? r.json() : null)).then((v) => fin(v), () => fin(null));
+        } else { fin(null); }
+      } catch (_) { fin(null); }
+    });
+
+    const fetchBankJson = async (path, qs) => {
+      for (let i = 0; i < SHARED_SRCS.length; i++) {
+        const v = await httpGetJson(SHARED_SRCS[i] + path + (qs || ''));
+        if (v !== null && v !== undefined) return v;
+      }
+      return null;
+    };
+
+    const readIdxCache = () => {
+      try {
+        const raw = rawGet(SHARED_IDX_KEY);
+        if (!raw) return null;
+        const p = JSON.parse(raw);
+        if (p && p.idx && typeof p.idx === 'object' && (Date.now() - (p.at || 0)) < IDX_TTL_MS) return p;
+      } catch (_) {}
+      return null;
+    };
+    const normIdx = (idx) => {
+      const out = { updatedAt: '', have: {}, total: 0, gen: 0 };
+      try {
+        if (idx && typeof idx === 'object') {
+          out.updatedAt = String(idx.updatedAt || '');
+          out.total = idx.total || 0;
+          out.gen = idx.gen || 0;
+          if (Array.isArray(idx.have)) idx.have.forEach((x) => { out.have[String(x)] = 1; });
+        }
+      } catch (_) {}
+      return out;
+    };
+    const loadIndex = (force) => {
+      const now = Date.now();
+      if (!force && shIdx && (now - shIdxAt) < IDX_TTL_MS) return Promise.resolve(shIdx);
+      if (!force) {
+        const c = readIdxCache();
+        if (c) { shIdx = normIdx(c.idx); shIdxAt = c.at || now; return Promise.resolve(shIdx); }
+      }
+      if (shIdxPromise) return shIdxPromise;
+      shIdxPromise = fetchBankJson('index.json', '?t=' + now).then((raw) => {
+        shIdxPromise = null;
+        if (raw && typeof raw === 'object') {
+          shIdx = normIdx(raw);
+          shIdxAt = Date.now();
+          try { rawSet(SHARED_IDX_KEY, JSON.stringify({ idx: raw, at: shIdxAt })); } catch (_) {}
+          try { refreshPanel(); } catch (_) {}
+        }
+        return shIdx;
+      });
+      return shIdxPromise;
+    };
+    const shRefresh = () => {
+      try {
+        Object.keys(shFailed).forEach((id) => { delete shFailed[id]; });
+        Object.keys(shFetches).forEach((id) => { delete shFetches[id]; });
+        return loadIndex(true).then((idx) => {
+          if (idx && idx.updatedAt) log('BANK', '📡 Kho chung: đã tải danh mục (' + idx.total + ' câu chia sẻ · cập nhật ' + timeAgo(Date.parse(idx.updatedAt) || Date.now()) + ').');
+          else log('BANK', '📡 Kho chung: chưa kết nối được danh mục (kiểm tra mạng rồi bấm thử lại).', 'warn');
+          return idx;
+        });
+      } catch (_) { return Promise.resolve(null); }
+    };
+
+    const shardKeyOf = (id) => 'EDUNEXT_STUDIO_SHARD_s' + id;
+    const readShard = (id) => {
+      if (shMem[id]) return shMem[id];
+      try {
+        const raw = rawGet(shardKeyOf(id));
+        if (raw) {
+          const p = JSON.parse(raw);
+          if (p && p.items && typeof p.items === 'object' && (Date.now() - (p.at || 0)) < SHARD_TTL_MS) {
+            shMem[id] = p;
+            return p;
+          }
+        }
+      } catch (_) {}
+      return null;
+    };
+    const shardRing = (id) => {
+      try {
+        let ring = [];
+        try { ring = JSON.parse(rawGet(SHARD_RING_KEY) || '[]') || []; } catch (_) { ring = []; }
+        ring = ring.filter((x) => x && x.id && x.id !== id);
+        ring.push({ id: id, t: Date.now() });
+        while (ring.length > MAX_SHARDS) {
+          const old = ring.shift();
+          try { rawDel(shardKeyOf(old.id)); } catch (_) {}
+          try { delete shMem[old.id]; } catch (_) {}
+        }
+        rawSet(SHARD_RING_KEY, JSON.stringify(ring));
+      } catch (_) {}
+    };
+    const fetchShard = (id) => {
+      if (shFetches[id]) return shFetches[id];
+      const tag = (shIdx && shIdx.updatedAt) ? shIdx.updatedAt : String(Date.now());
+      const p = fetchBankJson('shards/s_' + id + '.json', '?v=' + encodeURIComponent(tag)).then((obj) => {
+        delete shFetches[id];
+        if (obj && typeof obj === 'object' && obj.items && typeof obj.items === 'object') {
+          const pack = { at: Date.now(), v: String((shIdx && shIdx.updatedAt) || ''), items: obj.items };
+          shMem[id] = pack;
+          try { rawSet(shardKeyOf(id), JSON.stringify(pack)); shardRing(id); } catch (_) {}
+          try { refreshPanel(); } catch (_) {}
+          return pack;
+        }
+        shFailed[id] = 1;
+        return null;
+      });
+      shFetches[id] = p;
+      return p;
+    };
+    const sharedLookup = (key, qText) => {
+      try {
+        if (!shOn || !key) return null;
+        const id = shardIdOf(key);
+        const pack = readShard(id);
+        if (!pack || !pack.items) return null;
+        const it = pack.items[key];
+        if (!it || typeof it.a !== 'string' || !it.a.trim()) return null;
+        shShared = { k: key, a: it.a, t: Date.now() };
+        meta.shHits = (meta.shHits || 0) + 1;
+        saveSoon();
+        refreshPanel();
+        log('BANK', '📡 [KHO CHUNG] Trúng đáp án dùng chung (' + (it.n || 1) + ' lượt xác nhận): "' + snippet(cleanAns(it.a), 80) + '"');
+        return it.a;
+      } catch (_) { return null; }
+    };
+    const sharedWait = (qText, budgetMs) => {
+      try {
+        if (!shOn) return Promise.resolve(false);
+        try { if (typeof navigator !== 'undefined' && navigator && navigator.onLine === false) return Promise.resolve(false); } catch (_) {}
+        const k = keyOf(qText);
+        if (!k) return Promise.resolve(false);
+        const id = shardIdOf(k);
+        const pack = readShard(id);
+        if (pack && pack.items && pack.items[k]) return Promise.resolve(false);
+        if (pack && shIdx && shIdx.updatedAt && String(pack.v || '') === String(shIdx.updatedAt)) return Promise.resolve(false);
+        if (shFailed[id]) return Promise.resolve(false);
+        const inner = loadIndex(false).then((idx) => {
+          if (!idx || !idx.have || !idx.have[id]) return false;
+          if (shFailed[id]) return false;
+          if (shFetches[id]) return shFetches[id].then((p) => !!(p && p.items && p.items[k]), () => false);
+          return fetchShard(id).then((p) => !!(p && p.items && p.items[k]), () => false);
+        });
+        return withBudget(inner, budgetMs || SHARED_WAIT_MS);
+      } catch (_) { return Promise.resolve(false); }
+    };
+
+    const outboxTrim = () => {
+      try {
+        const ks = Object.keys(shOut.items || {});
+        if (ks.length > MAX_OUT_ITEMS) {
+          ks.sort((a, b) => ((shOut.items[a] || {}).t || 0) - ((shOut.items[b] || {}).t || 0));
+          const cut = ks.length - MAX_OUT_ITEMS;
+          for (let i = 0; i < cut; i++) delete shOut.items[ks[i]];
+        }
+        const fs2 = Object.keys(shOut.fb || {});
+        if (fs2.length > 300) {
+          fs2.sort((a, b) => ((shOut.fb[a] || {}).t || 0) - ((shOut.fb[b] || {}).t || 0));
+          const cut2 = fs2.length - 300;
+          for (let i = 0; i < cut2; i++) delete shOut.fb[fs2[i]];
+        }
+      } catch (_) {}
+    };
+    const saveOutboxSoon = () => {
+      if (shOutTimer) { try { clearTimeout(shOutTimer); } catch (_) {} }
+      shOutTimer = setTimeout(() => {
+        shOutTimer = null;
+        try { rawSet(OUTBOX_KEY, JSON.stringify(shOut)); } catch (_) {}
+      }, 400);
+    };
+    const pushOutbox = (k, it) => {
+      try {
+        if (!shOn || !k || !it || typeof it.a !== 'string' || !it.a.trim()) return;
+        if (shShared && shShared.k === k && substance(shShared.a) === substance(it.a) && (Date.now() - shShared.t) < 10 * 60 * 1000) return;
+        shOut.items[k] = { a: it.a, t: it.t || Date.now(), n: it.n || 0, q: it.q || '' };
+        outboxTrim();
+        saveOutboxSoon();
+      } catch (_) {}
+    };
+    const buildContrib = () => ({
+      app: 'EdUnExT_STUDIO', kind: 'bank-contrib', v: 1,
+      exportedAt: new Date().toISOString(),
+      count: Object.keys(shOut.items || {}).length,
+      fbCount: Object.keys(shOut.fb || {}).length,
+      items: shOut.items,
+      fb: shOut.fb
+    });
+    const doExportContrib = () => {
+      try {
+        const payload = buildContrib();
+        const blob = new Blob([JSON.stringify(payload, null, 1)], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const pad = (x) => (x < 10 ? '0' : '') + x;
+        const d = new Date();
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'DongGop-KhoChung_' + d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()) + '_' + pad(d.getHours()) + pad(d.getMinutes()) + '.json';
+        a.style.display = 'none';
+        (document.body || document.documentElement).appendChild(a);
+        a.click();
+        setTimeout(() => { try { a.remove(); } catch (_) {} try { URL.revokeObjectURL(url); } catch (_) {} }, 4000);
+        log('BANK', '📡 Đã xuất file đóng góp kho chung (' + payload.count + ' câu, ' + payload.fbCount + ' phản hồi). Gửi file này cho người gom kho để đưa lên resourcepack.');
+      } catch (e) {
+        log('BANK', '❌ Xuất đóng góp thất bại: ' + (e && e.message ? e.message : e), 'error');
+      }
+    };
+    const doClearOutbox = () => {
+      try {
+        if (!confirm('Dọn hộp gửi đóng góp trên máy này? (Chỉ nên dọn sau khi bạn đã gửi file đóng góp cho người gom kho chung)')) return;
+        shOut = { items: {}, fb: {} };
+        try { rawSet(OUTBOX_KEY, JSON.stringify(shOut)); } catch (_) {}
+        refreshPanel();
+        log('BANK', '🧹 Đã dọn hộp gửi đóng góp kho chung.');
+      } catch (_) {}
+    };
 
     const refreshPanel = () => {
       try {
@@ -11131,6 +11447,17 @@ body {
         setTxt('#sbStSaved', String(cnt));
         setTxt('#sbStHits', String(meta.hits || 0));
         setTxt('#sbStPun', String(meta.pun || 0));
+        setTxt('#sbContrib', '📡 Đóng góp (' + (Object.keys(shOut.items || {}).length + Object.keys(shOut.fb || {}).length) + ')');
+        const so = $('#sbShOn');
+        if (so) {
+          so.textContent = '🌐 Kho chung: ' + (shOn ? 'ON' : 'OFF');
+          try { if (shOn) so.classList.add('on'); else so.classList.remove('on'); } catch (_) {}
+        }
+        let shTxt = '';
+        if (!shOn) shTxt = 'đang tắt';
+        else if (shIdx) shTxt = shIdx.total + ' câu chia sẻ · cập nhật ' + (shIdx.updatedAt ? timeAgo(Date.parse(shIdx.updatedAt) || shIdxAt) : timeAgo(shIdxAt)) + ((meta.shHits || 0) > 0 ? ' · đã trúng ' + meta.shHits + ' lượt' : '');
+        else shTxt = 'chưa kết nối (bấm dòng này để tải danh mục)';
+        setTxt('#sbShTxt', shTxt);
         const tg = $('#sbToggle');
         if (tg) {
           tg.textContent = enabled ? 'ON' : 'OFF';
@@ -11172,10 +11499,16 @@ body {
               <div class="stat"><div class="stat-v" id="sbStPun">0</div><div class="stat-l">Đã Xoá</div></div>
             </div>
             <div id="sbLast" style="font-size:9.5px;color:#94a3b8;line-height:1.55;margin-bottom:8px;word-break:break-word">Chưa có dữ liệu.</div>
+            <div id="sbShLine" style="font-size:9.5px;color:#94a3b8;line-height:1.55;margin-bottom:8px;word-break:break-word;cursor:pointer" title="Bấm để tải lại danh mục kho chung từ GitHub resourcepack">📡 Kho chung: <span id="sbShTxt">chưa kết nối</span></div>
             <div style="display:flex;gap:6px;flex-wrap:wrap">
               <button class="btn btn-f" id="sbExport" title="Tải kho ra file JSON để cất giữ hoặc chia sẻ">📤 Xuất kho</button>
               <button class="btn btn-f" id="sbImport" title="Nhập kho từ file JSON đã xuất (tự gộp, giữ bản mới hơn)">📥 Nhập kho</button>
               <button class="btn btn-k" id="sbClear" title="Xoá toàn bộ kho trên máy này">🗑 Xoá kho</button>
+            </div>
+            <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:6px">
+              <button class="btn btn-f" id="sbContrib" title="Xuất file đóng góp (các câu chấm đúng trên máy bạn) để gom lên kho chung">📡 Đóng góp (0)</button>
+              <button class="btn btn-f" id="sbShOn" title="Bật/tắt sử dụng kho đáp án dùng chung qua GitHub resourcepack">🌐 Kho chung: ON</button>
+              <button class="btn btn-k" id="sbOutClear" title="Dọn hộp gửi đóng góp trên máy này (chỉ dọn sau khi đã gửi file đóng góp)">🧹 Dọn hộp gửi</button>
             </div>
             <input type="file" id="sbFile" accept=".json,application/json" style="display:none">
           </div>`;
@@ -11209,6 +11542,10 @@ body {
           try { bf.value = ''; } catch (_) {}
         });
         const bc = $('#sbClear'); if (bc) bc.addEventListener('click', () => { doClear(); });
+        const shl = $('#sbShLine'); if (shl) shl.addEventListener('click', () => { shRefresh(); });
+        const bc2 = $('#sbContrib'); if (bc2) bc2.addEventListener('click', () => { doExportContrib(); });
+        const bo2 = $('#sbShOn'); if (bo2) bo2.addEventListener('click', () => { setShared(!shOn); });
+        const bq = $('#sbOutClear'); if (bq) bq.addEventListener('click', () => { doClearOutbox(); });
         refreshPanel();
       } catch (_) {}
     };
@@ -11222,6 +11559,7 @@ body {
         if (!k) return;
         const prev = items[k];
         items[k] = { a: ans, t: Date.now(), n: prev ? (prev.n || 0) : 0, q: snippet(qText, 110) };
+        try { pushOutbox(k, items[k]); } catch (_) {}
         lastLearn = snippet(cleanAns(ans), 80);
         evict();
         saveSoon();
@@ -11233,14 +11571,27 @@ body {
     const punish = (qText) => {
       try {
         const k = keyOf(qText);
-        if (!k || !items[k]) return;
-        const gone = snippet(cleanAns(items[k].a), 70);
-        delete items[k];
-        meta.pun = (meta.pun || 0) + 1;
-        lastPun = gone;
-        saveSoon();
-        refreshPanel();
-        log('BANK', '🗑 Đáp án này bị chấm SAI — đã xoá khỏi kho để không bao giờ tái sử dụng: "' + gone + '"', 'warn');
+        if (!k) return;
+        let acted = false;
+        if (items[k]) {
+          const gone = snippet(cleanAns(items[k].a), 70);
+          delete items[k];
+          meta.pun = (meta.pun || 0) + 1;
+          lastPun = gone;
+          saveSoon();
+          acted = true;
+          log('BANK', '🗑 Đáp án này bị chấm SAI — đã xoá khỏi kho để không bao giờ tái sử dụng: "' + gone + '"', 'warn');
+        }
+        if (shOn && shShared && shShared.k === k && (Date.now() - shShared.t) < 30 * 60 * 1000) {
+          const fbk = shOut.fb || (shOut.fb = {});
+          const cur = fbk[k];
+          fbk[k] = { a: shShared.a, t: Date.now(), c: ((cur && cur.c) || 0) + 1 };
+          saveOutboxSoon();
+          refreshPanel();
+          log('BANK', '📡 Đã ghi phản hồi: đáp án vừa dùng từ KHO CHUNG bị chấm SAI — sẽ được rà soát khi gom kho.', 'warn');
+        } else if (acted) {
+          refreshPanel();
+        }
       } catch (_) {}
     };
 
@@ -11274,16 +11625,23 @@ body {
         const k = keyOf(qText);
         if (!k) return null;
         const it = items[k];
-        if (!it || !it.a) return null;
-        if (TTL_MS > 0 && Date.now() - (it.t || 0) > TTL_MS) { delete items[k]; saveSoon(); return null; }
-        it.n = (it.n || 0) + 1;
-        it.t = Date.now();
-        meta.hits = (meta.hits || 0) + 1;
-        lastHit = snippet(cleanAns(it.a), 80);
-        saveSoon();
-        refreshPanel();
-        log('BANK', '📚 [KHO ĐÁP ÁN STUDIO] Trúng kho! Tái dùng đáp án đã từng được chấm CHÍNH XÁC (lần thứ ' + it.n + ', 0 token): "' + lastHit + '"');
-        return hardenAns(it.a, qText);
+        if (it && it.a) {
+          if (TTL_MS > 0 && Date.now() - (it.t || 0) > TTL_MS) {
+            delete items[k];
+            saveSoon();
+          } else {
+            it.n = (it.n || 0) + 1;
+            it.t = Date.now();
+            meta.hits = (meta.hits || 0) + 1;
+            lastHit = snippet(cleanAns(it.a), 80);
+            saveSoon();
+            refreshPanel();
+            log('BANK', '📚 [KHO ĐÁP ÁN STUDIO] Trúng kho! Tái dùng đáp án đã từng được chấm CHÍNH XÁC (lần thứ ' + it.n + ', 0 token): "' + lastHit + '"');
+            return hardenAns(it.a, qText);
+          }
+        }
+        const shr = sharedLookup(k, qText);
+        return shr ? hardenAns(shr, qText) : null;
       } catch (_) { return null; }
     };
 
@@ -11366,7 +11724,7 @@ body {
       try {
         if (!confirm('Xoá toàn bộ kho đáp án STUDIO trên máy này? (Các file bạn đã xuất không bị ảnh hưởng)')) return;
         items = {};
-        meta = { hits: 0, pun: 0 };
+        meta = { hits: 0, pun: 0, shHits: 0 };
         lastLearn = ''; lastHit = ''; lastPun = '';
         persist();
         refreshPanel();
@@ -11381,6 +11739,13 @@ body {
       if (!quiet) log('BANK', enabled ? '✅ Kho đáp án STUDIO: BẬT (tự học + tái sử dụng đáp án đúng).' : '⏸ Kho đáp án STUDIO: TẮT (không học, không tái sử dụng).');
     };
 
+    const setShared = (v, quiet) => {
+      shOn = !!v;
+      try { rawSet(SHARED_ON_KEY, shOn ? '1' : '0'); } catch (_) {}
+      refreshPanel();
+      if (!quiet) log('BANK', shOn ? '✅ Kho chung: BẬT (gặp câu chưa có trên máy sẽ tự tra kho đáp án dùng chung trên GitHub resourcepack).' : '⏸ Kho chung: TẮT (không tra, không đóng góp kho chung).');
+    };
+
     const load = () => {
       try {
         const raw = rawGet(BANK_KEY);
@@ -11388,14 +11753,30 @@ body {
           const p = JSON.parse(raw);
           if (p && typeof p === 'object' && p.items && typeof p.items === 'object') {
             items = p.items;
-            if (p.meta && typeof p.meta === 'object') meta = { hits: p.meta.hits || 0, pun: p.meta.pun || 0 };
+            if (p.meta && typeof p.meta === 'object') meta = { hits: p.meta.hits || 0, pun: p.meta.pun || 0, shHits: p.meta.shHits || 0 };
           }
         }
         const onRaw = rawGet(ON_KEY);
         enabled = (onRaw === '' ? '1' : onRaw) !== '0';
+        const shRaw = rawGet(SHARED_ON_KEY);
+        shOn = (shRaw === '' ? '1' : shRaw) !== '0';
+        try {
+          const o = rawGet(OUTBOX_KEY);
+          if (o) {
+            const po = JSON.parse(o);
+            shOut = {
+              items: (po && po.items && typeof po.items === 'object') ? po.items : {},
+              fb: (po && po.fb && typeof po.fb === 'object') ? po.fb : {}
+            };
+          }
+        } catch (_) { shOut = { items: {}, fb: {} }; }
+        try {
+          const c = readIdxCache();
+          if (c) { shIdx = normIdx(c.idx); shIdxAt = c.at || 0; }
+        } catch (_) {}
       } catch (_) {
         items = {};
-        meta = { hits: 0, pun: 0 };
+        meta = { hits: 0, pun: 0, shHits: 0 };
         try { log('BANK', '⚠️ Kho đáp án cũ bị hỏng định dạng — đã khởi tạo lại kho rỗng.', 'warn'); } catch (__) {}
       }
     };
@@ -11417,6 +11798,34 @@ body {
       try { origDel.call(questionCache, qText); } catch (_) {}
       try { punish(qText); } catch (_) {}
     };
+
+    try {
+      if (typeof aiProvider !== 'undefined' && aiProvider && typeof aiProvider.solve === 'function' && !aiProvider.__sbWrapped) {
+        aiProvider.__sbWrapped = true;
+        const origAISolve = aiProvider.solve;
+        aiProvider.solve = async function (qd) {
+          try {
+            if (shOn && enabled && qd) {
+              const retrying = (STATE && ((STATE.retryCount || 0) > 0 || (STATE.wrongAnswers && STATE.wrongAnswers.length > 0)));
+              const qText = qd.questionText || qd.text || '';
+              if (!retrying && qText) {
+                const k = keyOf(qText);
+                if (k) {
+                  let hasFast = false;
+                  try { hasFast = !!items[k]; } catch (_) {}
+                  if (!hasFast) { try { hasFast = !!origGet.call(questionCache, qText); } catch (_) {} }
+                  if (!hasFast) {
+                    const got = await sharedWait(qText, SHARED_WAIT_MS);
+                    if (got) log('BANK', '⚡ Kho chung đã cung cấp sẵn đáp án TRƯỚC khi cần tới AI — tiết kiệm 1 lượt gọi (0 token).');
+                  }
+                }
+              }
+            }
+          } catch (_) {}
+          return origAISolve.apply(this, arguments);
+        };
+      }
+    } catch (_) {}
 
     const origBuildGUI = buildGUI;
     buildGUI = function () {
@@ -11443,10 +11852,25 @@ body {
         setEnabled: setEnabled,
         reload: load,
         refresh: refreshPanel,
-        payload: buildPayload
+        payload: buildPayload,
+        sh: {
+          state: () => ({ on: shOn, idx: shIdx, idxAt: shIdxAt, outItems: Object.keys(shOut.items || {}).length, outFb: Object.keys(shOut.fb || {}).length, last: shShared }),
+          set: setShared,
+          refresh: shRefresh,
+          export: doExportContrib,
+          clear: doClearOutbox,
+          wait: sharedWait,
+          lookup: sharedLookup,
+          shardId: shardIdOf,
+          index: (f) => loadIndex(!!f),
+          fetchShard: fetchShard,
+          readShard: readShard,
+          contrib: buildContrib,
+          idxCache: readIdxCache
+        }
       };
     } catch (_) {}
-    log('BANK', '📚 Kho đáp án tự học STUDIO: ' + (enabled ? 'BẬT' : 'TẮT') + ' • đã nạp ' + Object.keys(items).length + ' câu từ máy.');
+    log('BANK', '📚 Kho đáp án tự học STUDIO: ' + (enabled ? 'BẬT' : 'TẮT') + ' • đã nạp ' + Object.keys(items).length + ' câu từ máy • 📡 Kho chung: ' + (shOn ? 'BẬT' + (shIdx ? ' (' + shIdx.total + ' câu chia sẻ)' : '') : 'TẮT') + '.');
   } catch (e) {
     try { log('BANK', '⚠️ Kho đáp án STUDIO gặp lỗi khởi động (bỏ qua, script vẫn chạy bình thường): ' + (e && e.message ? e.message : e), 'warn'); } catch (_) {}
   }
