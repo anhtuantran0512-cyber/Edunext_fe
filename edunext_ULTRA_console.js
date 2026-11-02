@@ -1281,13 +1281,157 @@
       return new File([u8arr], filename, { type: mime });
     }
 
-    async function attachImageToGemini(base64Data) {
+    /* Đếm số "chip" ảnh đang nằm trong khung soạn thảo Gemini để biết ảnh đã thực sự được nhận hay chưa.
+       Chỉ paste/drop mà không kiểm chứng là nguyên nhân số 1 khiến Gemini nhận đề "cụt" (mất hình). */
+    function countPendingAttachments() {
       try {
-        const file = base64ToFile(base64Data);
-        const inputEl = await findInput();
+        const sel = [
+          'img[src^="blob:"]',
+          '.attachment-container',
+          '[data-testid="image-preview"]',
+          '[data-testid*="attachment" i]',
+          'uploader-file-preview',
+          '[class*="file-preview"]',
+          '[class*="image-preview"]'
+        ].join(',');
+        let n = 0;
+        document.querySelectorAll(sel).forEach((el) => {
+          if (el.closest('.model-response-text, message-content, .conversation-container, .chat-history')) return;
+          if (el.getBoundingClientRect && el.getBoundingClientRect().width < 8) return;
+          n++;
+        });
+        return n;
+      } catch (_) {
+        return 0;
+      }
+    }
+
+    async function waitForAttachment(beforeCount, maxMs = 3500) {
+      const start = Date.now();
+      while (Date.now() - start < maxMs) {
+        if (countPendingAttachments() > beforeCount) return true;
+        await sleepB(250);
+      }
+      return countPendingAttachments() > beforeCount;
+    }
+
+    /* Gemini 2026 chỉ mount input[type=file][accept*="image"] SAU khi bấm nút "Nội dung tải lên và công cụ".
+       Đã kiểm chứng thực tế: đường paste/drop thường im lặng không đính kèm gì → đề gửi đi bị mất hình. */
+    async function findImageUploadInput() {
+      const sel = 'input[type="file"][accept*="image" i]';
+      let el = document.querySelector(sel);
+      if (el) return el;
+      const plus = document.querySelector([
+        'button[aria-label*="Nội dung tải lên"]',
+        'button[aria-label*="tải lên và công cụ" i]',
+        'button[aria-label*="Upload content" i]',
+        'button[aria-label*="upload and tools" i]',
+        'button[aria-label*="Tải tệp lên" i]'
+      ].join(','));
+      if (plus) {
+        try { plus.click(); } catch (_) {}
+        for (let i = 0; i < 12; i++) {
+          await sleepB(250);
+          el = document.querySelector(sel);
+          if (el) return el;
+        }
+      }
+      return null;
+    }
+
+    async function closeGeminiOverlay() {
+      try {
+        const backdrop = document.querySelector('.cdk-overlay-container .cdk-overlay-backdrop');
+        if (backdrop) { backdrop.click(); await sleepB(250); }
+        document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', keyCode: 27, which: 27, bubbles: true }));
+        await sleepB(200);
+      } catch (_) {}
+    }
+
+    /* Lấy ảnh từ URL (phía EduNext gửi URL thay vì base64 để khỏi vỡ gói truyền
+       giữa 2 tab khác origin). GM_xmlhttpRequest bỏ qua CORS nên tải được mọi nguồn. */
+    async function urlToBase64(url) {
+      if (!url || typeof url !== 'string') return null;
+      if (url.startsWith('data:')) return url;
+      try {
+        if (typeof GM_xmlhttpRequest === 'function') {
+          const b64 = await new Promise((resolve) => {
+            GM_xmlhttpRequest({
+              method: 'GET', url, responseType: 'arraybuffer', timeout: 20000,
+              onload: (r) => {
+                try {
+                  if (r.status >= 200 && r.status < 300 && r.response && r.response.byteLength > 50) {
+                    let bin = '';
+                    const bytes = new Uint8Array(r.response);
+                    const chunk = 0x8000;
+                    for (let i = 0; i < bytes.length; i += chunk) {
+                      bin += String.fromCharCode.apply(null, bytes.subarray(i, i + chunk));
+                    }
+                    let mime = 'image/png';
+                    const ct = r.responseHeaders ? r.responseHeaders.match(/content-type:\s*([^\r\n;]+)/i) : null;
+                    if (ct && ct[1] && ct[1].trim().toLowerCase().startsWith('image/')) mime = ct[1].trim().toLowerCase();
+                    resolve(`data:${mime};base64,${btoa(bin)}`);
+                    return;
+                  }
+                  resolve(null);
+                } catch (_) { resolve(null); }
+              },
+              onerror: () => resolve(null),
+              ontimeout: () => resolve(null),
+            });
+          });
+          if (b64) return b64;
+        }
+      } catch (_) {}
+      /* Dự phòng: fetch thường (nguồn cho phép CORS). */
+      try {
+        const r = await fetch(url);
+        if (r.ok) {
+          const blob = await r.blob();
+          if (blob.size > 50) {
+            return await new Promise((res) => {
+              const fr = new FileReader();
+              fr.onloadend = () => res(fr.result);
+              fr.onerror = () => res(null);
+              fr.readAsDataURL(blob);
+            });
+          }
+        }
+      } catch (_) {}
+      return null;
+    }
+
+    async function attachImageToGemini(base64Data, index = 0) {
+      try {
+        /* Ảnh đã nén sang JPEG nên đuôi file phải khớp MIME, tránh uploader của Gemini
+           nhận "png" mà nội dung là JPEG. */
+        const ext = /^data:image\/(jpeg|jpg)/i.test(base64Data) ? 'jpg'
+          : /^data:image\/(webp)/i.test(base64Data) ? 'webp'
+          : /^data:image\/(gif)/i.test(base64Data) ? 'gif' : 'png';
+        const file = base64ToFile(base64Data, `question-${index + 1}.${ext}`);
+        let inputEl = await findInput();
         if (!inputEl) return false;
 
         const targetEditor = inputEl.hasAttribute('contenteditable') ? inputEl : (inputEl.querySelector?.('[contenteditable="true"]') || inputEl);
+        const beforeCount = countPendingAttachments();
+
+        /* Cách 1 (chuẩn, đã kiểm chứng): nút "+" → input file ảnh → gán files → chip ảnh xuất hiện */
+        const fileInput = await findImageUploadInput();
+        if (fileInput) {
+          try {
+            const dt = new DataTransfer();
+            dt.items.add(file);
+            fileInput.files = dt.files;
+            fileInput.dispatchEvent(new Event('input', { bubbles: true }));
+            fileInput.dispatchEvent(new Event('change', { bubbles: true }));
+            if (await waitForAttachment(beforeCount, 9000)) {
+              await closeGeminiOverlay();
+              console.log('[EduNext Bridge] Ảnh đã nạp qua input file của Gemini');
+              return true;
+            }
+            console.warn('[EduNext Bridge] input file của Gemini không tạo chip ảnh, thử paste/drop...');
+          } catch (_) {}
+        }
 
         try {
           const dt = new DataTransfer();
@@ -1301,8 +1445,7 @@
           targetEditor.focus();
           targetEditor.dispatchEvent(pasteEvent);
           console.log('[EduNext Bridge] Đã phát sự kiện paste ảnh vào ô nhập liệu Gemini');
-          await sleepB(1000);
-          return true;
+          if (await waitForAttachment(beforeCount, 4000)) return true;
         } catch (_) {}
 
         const fileInputs = document.querySelectorAll('input[type="file"]');
@@ -1311,10 +1454,10 @@
             const dt = new DataTransfer();
             dt.items.add(file);
             fi.files = dt.files;
+            fi.dispatchEvent(new Event('input', { bubbles: true }));
             fi.dispatchEvent(new Event('change', { bubbles: true }));
-            console.log('[EduNext Bridge] Upload ảnh thành công qua file input');
-            await sleepB(1000);
-            return true;
+            console.log('[EduNext Bridge] Upload ảnh qua file input dự phòng');
+            if (await waitForAttachment(beforeCount, 5000)) { await closeGeminiOverlay(); return true; }
           } catch (_) {}
         }
 
@@ -1330,13 +1473,59 @@
           const richArea = document.querySelector('rich-textarea') || targetEditor;
           richArea.dispatchEvent(dropEvent);
           console.log('[EduNext Bridge] Đã phát sự kiện drop ảnh vào rich-textarea');
-          await sleepB(1000);
-          return true;
+          if (await waitForAttachment(beforeCount, 4000)) return true;
         } catch (_) {}
 
+        console.warn('[EduNext Bridge] Không xác nhận được ảnh đã bám vào khung soạn thảo Gemini!');
         return false;
       } catch (err) {
         console.error('[EduNext Bridge] Lỗi upload ảnh:', err);
+        return false;
+      }
+    }
+
+    /* Chọn model mạnh cho tab Gemini trước khi gửi đề.
+       Vì sao cần: Gemini Web mặc định thường là Flash; các câu Sinh/Hoá/Lí cần suy luận
+       nhiều bước sẽ dễ sai. Bộ chọn model nằm ở nút hiển thị "Flash/Pro" cạnh ô nhập.
+       Nếu trang không có bộ chọn (Gemini đổi UI) thì bỏ qua im lặng, không chặn việc gửi. */
+    async function ensureGeminiModel(want = null) {
+      try {
+        const target = (want || STATE.geminiModelPref || '3.1 Pro').trim();
+        if (STATE.geminiModelReady && STATE.geminiModelApplied === target) return true;
+        const readModel = () => {
+          const b = [...document.querySelectorAll('button')]
+            .find(x => /^(Flash|Pro|Argon)/i.test((x.innerText || '').trim()));
+          return b ? b.innerText.replace(/\s+/g, ' ').trim() : null;
+        };
+        let cur = null;
+        for (let i = 0; i < 12 && !cur; i++) { cur = readModel(); if (!cur) await sleepB(500); }
+        if (!cur) { console.log('[EduNext Bridge] Không thấy nút chọn model Gemini — bỏ qua.'); return false; }
+        if (new RegExp(target.split(' ')[0], 'i').test(cur)) {
+          STATE.geminiModelReady = true;
+          STATE.geminiModelApplied = target;
+          console.log(`[EduNext Bridge] Model Gemini đã đúng: ${cur}`);
+          return true;
+        }
+
+        const picker = [...document.querySelectorAll('button')]
+          .find(x => /^(Flash|Pro|Argon)/i.test((x.innerText || '').trim()));
+        if (!picker) return false;
+        picker.click();
+        await sleepB(1200);
+        const rx = new RegExp(target.replace(/\s+/g, '\\s*'), 'i');
+        const opt = [...document.querySelectorAll('button, [role="menuitem"], [role="menuitemradio"], [role="option"]')]
+          .find(x => rx.test(x.innerText || '') && (x.innerText || '').length < 120);
+        if (opt) { opt.click(); await sleepB(1600); }
+        /* Menu chọn model có thể còn mở và che ô nhập → đóng overlay trước khi đính ảnh/gõ đề. */
+        try { await closeGeminiOverlay(); } catch (_) {}
+        const after = readModel();
+        STATE.geminiModelReady = true;
+        STATE.geminiModelApplied = target;
+        console.log(`[EduNext Bridge] Model Gemini: ${cur} -> ${after || '?'} (muốn: ${target})`);
+        setBadge(`🌉 Model Gemini: ${after || target}`, '#818cf8');
+        return !!(after && new RegExp(target.split(' ')[0], 'i').test(after));
+      } catch (e) {
+        console.warn('[EduNext Bridge] ensureGeminiModel lỗi:', e && e.message);
         return false;
       }
     }
@@ -1444,31 +1633,29 @@
             }
           } catch (_) {}
 
+          /* Gemini/Quill CHẶN sự kiện paste tổng hợp (đã kiểm chứng thực tế: ô nhập vẫn rỗng → đề gửi đi trắng).
+             execCommand('insertText') là cách DUY NHẤT thực sự đưa được chữ vào và gửi đi được.
+             Quill lại gộp mọi xuống dòng thành 1 khối, nên nối các dòng bằng dấu cách để không dính chữ. */
+          const flatText = lines.map(l => l.trim()).filter(Boolean).join(' ');
           try {
-            const dt = new DataTransfer();
-            dt.setData('text/plain', cleanText);
-            const pasteEvt = new ClipboardEvent('paste', {
-              clipboardData: dt, bubbles: true, cancelable: true, composed: true
-            });
-            targetEditor.dispatchEvent(pasteEvt);
-            await sleepB(40);
+            doc.execCommand('insertText', false, flatText);
+            await sleepB(80);
           } catch (_) {}
 
           let curLen = (targetEditor.textContent || targetEditor.value || '').trim().length;
-          if (curLen < Math.min(cleanText.length * 0.7, 30)) {
-            for (let i = 0; i < lines.length; i++) {
-              if (lines[i].length > 0) {
-                doc.execCommand('insertText', false, lines[i]);
-              }
-              if (i < lines.length - 1) {
-                doc.execCommand('insertLineBreak');
-              }
-            }
-            await sleepB(50);
+          if (curLen < Math.min(flatText.length * 0.7, 30)) {
+            try {
+              const dt = new DataTransfer();
+              dt.setData('text/plain', cleanText);
+              targetEditor.dispatchEvent(new ClipboardEvent('paste', {
+                clipboardData: dt, bubbles: true, cancelable: true, composed: true
+              }));
+              await sleepB(150);
+            } catch (_) {}
           }
 
           curLen = (targetEditor.textContent || targetEditor.value || '').trim().length;
-          if (curLen >= Math.min(cleanText.length * 0.7, 30)) {
+          if (curLen >= Math.min(flatText.length * 0.7, 30)) {
             injectSuccess = true;
           }
         }
@@ -1511,7 +1698,7 @@
 
       await sleepB(100);
       const finalContent = (targetEditor.textContent || targetEditor.value || '').trim();
-      return finalContent.length >= Math.min(10, cleanText.length);
+      return finalContent.length >= Math.min(10, cleanText.length * 0.7);
     }
 
     async function clickSend(inputEl) {
@@ -1863,6 +2050,19 @@
       return found;
     }
 
+    /* Đếm lượt hỏi của người dùng: tín hiệu DUY NHẤT cho biết tin nhắn đã thực sự
+       rời khỏi ô soạn thảo. Chỉ đếm model-response thì không phân biệt được
+       "chưa gửi được" với "đã gửi nhưng Gemini chưa trả lời". */
+    function countUserTurns() {
+      try {
+        const sel = 'user-query, .user-query, [data-message-author-role="user"], .query-text';
+        return Array.from(document.querySelectorAll(sel))
+          .filter(el => el && el.isConnected && el.id !== 'edunext-gemini-bridge-badge').length;
+      } catch (_) {
+        return 0;
+      }
+    }
+
     function findGeminiCopyButton(targetElement) {
       if (!targetElement) return null;
       try {
@@ -1924,6 +2124,8 @@
           .replace(/<thinking>[\s\S]*?<\/thinking>/gi, '')
           .replace(/(?:^|\n)\s*(?:Đang suy nghĩ|Suy nghĩ trong|Thinking|Thoughts)[\s\S]*?(?=\n\s*(?:Trả lời|Đáp án|[A-ZÀ-Ỹ0-9])|$)/gi, '')
           .replace(/(?:^|\n)\s*(?:Gemini\s*có\s*thể\s*đưa\s*ra\s*thông\s*tin\s*không\s*chính\s*xác|Google\s*Gemini\s*có\s*thể\s*mắc\s*lỗi|Gemini\s*là\s*một\s*AI\s*và\s*có\s*thể\s*mắc\s*sai\s*sót)[\s\S]*$/gi, '')
+          /* Tên file ảnh đính kèm (vd. "question-1_e44ea5.png") bị render chung khối đáp án — phải loại bỏ */
+          .replace(/(?:^|\n)\s*[\w\-. ()[\]]{1,80}\.(?:png|jpe?g|webp|gif|bmp|pdf|docx?|xlsx?|pptx?)\s*(?=\n|$)/gi, '\n')
           .replace(/\n{3,}/g, '\n\n')
           .trim();
 
@@ -1937,7 +2139,7 @@
       }
     }
 
-    async function waitForResponse(baselineCount, baselineText, reqId, timeoutMs = 60000) {
+    async function waitForResponse(baselineCount, baselineText, reqId, timeoutMs = 150000) {
       const startTime = Date.now();
       let lastText = '';
       let stableCount = 0;
@@ -1979,7 +2181,14 @@
             if (currentText === lastText) {
               stableCount++;
               const isDifferentFromOld = (currentCount > baselineCount) || (currentText !== baselineText);
-              const isGenerationDone = !isGeneratingNow && isDifferentFromOld && ((everSawGenerating && stableCount >= 2) || (stableCount >= 4));
+              /* Chờ văn bản ổn định đủ lâu (1,5s nếu đã thấy trạng thái đang sinh, 2s nếu không)
+                 để không cắt ngang câu trả lời dài / mô hình suy luận nâng cao đang tạm nghỉ giữa chừng. */
+              /* Văn bản đứng yên chưa chắc đã xong: Gemini chen khoảng lặng giữa câu.
+                 Chỉ cắt sớm khi câu đã trọn (có "Trả lời:"/"ĐÁP ÁN:" hoặc kết thúc bằng dấu câu). */
+              const looksComplete = /(?:Trả\s*lời|ĐÁP\s*ÁN|Đáp\s*án)\s*[:：]/i.test(currentText)
+                || /[.!?…:)\]]\s*$/.test(currentText.trim());
+              const isGenerationDone = !isGeneratingNow && isDifferentFromOld
+                && (stableCount >= 12 || ((everSawGenerating && stableCount >= 6) || stableCount >= 8) && looksComplete);
 
               if (isGenerationDone) {
                 return currentText;
@@ -2121,7 +2330,25 @@
         updateGeminiTabTitle('[📥 Nhận đề]');
         notifyAll(id => reportStatus(id, 'RECEIVING', 'Tab Gemini đã nhận được câu hỏi từ EduNext'));
 
+        /* Mở chat mới theo chu kỳ: dùng mãi một hội thoại dài làm Gemini loãng ngữ cảnh,
+           trả lời chậm và dễ bám nhầm đề cũ. 8 lượt/lần là đủ để vừa sạch vừa không thao tác nhiều. */
+        STATE.bridgeTurnCount = (STATE.bridgeTurnCount || 0) + 1;
+        if (STATE.bridgeTurnCount > 1 && STATE.bridgeTurnCount % 8 === 0) {
+          try {
+            const newChatBtn = [...document.querySelectorAll('button, a')].find(x =>
+              /cuộc trò chuyện mới|new chat/i.test((x.getAttribute('aria-label') || '') + ' ' + (x.innerText || '')));
+            if (newChatBtn) {
+              newChatBtn.click();
+              await sleepB(2500);
+              STATE.geminiModelReady = false;   /* UI dựng lại — phải chọn lại model */
+              reportStatus(reqId, 'RECEIVING', 'Đã mở hội thoại mới trên Gemini để giải sạch ngữ cảnh');
+            }
+          } catch (_) {}
+        }
+
         await waitForReady();
+        /* Chọn model mạnh TRƯỚC khi đính ảnh/gõ đề (đổi model có thể dựng lại composer). */
+        try { await ensureGeminiModel(); } catch (_) {}
         const input = await findInput();
         if (!input) {
           console.error('[EduNext Bridge] Không tìm thấy ô nhập liệu Gemini');
@@ -2135,18 +2362,66 @@
 
         const initialResponses = getModelResponseElements();
         const baselineCount = initialResponses.length;
+        const baselineUserTurns = countUserTurns();
         const lastExistingEl = baselineCount > 0 ? initialResponses[baselineCount - 1] : null;
         const baselineText = lastExistingEl ? extractCleanResponseText(lastExistingEl) : '';
 
 
-        if (req.imageBase64 && typeof req.imageBase64 === 'string' && req.imageBase64.length > 50) {
+        /* Ưu tiên base64 gửi kèm (đã có sẵn, không phụ thuộc CORS), rồi mới bổ sung
+           bằng URL nếu thiếu. Trước đây làm ngược lại: tab Gemini bị CORS chặn nên
+           tải URL thất bại và ảnh đề không bao giờ tới nơi. */
+        const inboundImages = [];
+        const inline = (Array.isArray(req.images) && req.images.length > 0
+          ? req.images
+          : (req.imageBase64 ? [req.imageBase64] : []))
+          .filter(x => typeof x === 'string' && x.length > 50);
+        inboundImages.push(...inline.slice(0, 3));
+        if (inline.length) console.log(`[EduNext Bridge] Nhận ${inline.length} ảnh base64 gửi kèm theo yêu cầu.`);
+
+        const urls = (Array.isArray(req.imageUrls) ? req.imageUrls : []).filter(x => typeof x === 'string' && /^https?:|^data:/i.test(x)).slice(0, 3);
+        if (inboundImages.length < Math.min(3, Math.max(urls.length, inline.length))) {
+          for (let i = 0; i < urls.length && inboundImages.length < 3; i++) {
+            const b64 = await urlToBase64(urls[i]);
+            console.log(`[EduNext Bridge] Ảnh URL ${i + 1}/${urls.length}: ${b64 ? 'tải được ' + b64.length + ' ký tự' : 'TẢI THẤT BẠI'}`);
+            if (b64 && !inboundImages.includes(b64)) inboundImages.push(b64);
+          }
+        }
+
+        const claimedImages = (Array.isArray(req.imageUrls) && req.imageUrls.length > 0)
+          || (Array.isArray(req.images) && req.images.length > 0) || !!req.imageBase64;
+        if (claimedImages && !inboundImages.length) {
+          console.error('[EduNext Bridge] ❌ Yêu cầu CÓ ảnh nhưng không tải được ảnh nào — Gemini sẽ giải thiếu dữ liệu hình!');
+          notifyAll(id => reportStatus(id, 'UPLOADING_IMAGE', 'Không tải được ảnh đề bài (CORS/GM_xhr)'));
+        }
+
+        if (inboundImages.length > 0) {
           setBadge('🌉 Đang đính kèm hình ảnh câu hỏi...', '#f59e0b');
           updateGeminiTabTitle('[🖼️ Tải ảnh]');
-          notifyAll(id => reportStatus(id, 'UPLOADING_IMAGE', 'Đang tải hình ảnh câu hỏi lên Gemini...'));
-          try {
-            await attachImageToGemini(req.imageBase64);
-          } catch (_) {}
-          await sleepB(1200);
+          notifyAll(id => reportStatus(id, 'UPLOADING_IMAGE', `Đang tải ${inboundImages.length} hình ảnh đề bài lên Gemini...`));
+          const chipsBefore = countPendingAttachments();
+          for (let i = 0; i < inboundImages.length; i++) {
+            let ok = false;
+            try { ok = await attachImageToGemini(inboundImages[i], i); } catch (_) {}
+            /* Lần đầu có thể hụt vì overlay upload chưa dựng xong — thử lại 1 lượt
+               còn hơn để Gemini giải đề thiếu hình. */
+            if (!ok) {
+              await sleepB(1200);
+              try { ok = await attachImageToGemini(inboundImages[i], i); } catch (_) {}
+              if (ok) console.log(`[EduNext Bridge] Ảnh ${i + 1} bám được ở lượt thử lại.`);
+            }
+            console.log(`[EduNext Bridge] Ảnh ${i + 1}/${inboundImages.length}: ${ok ? 'đã bám vào khung soạn thảo' : 'KHÔNG xác nhận được'}`);
+            await sleepB(inboundImages.length > 1 ? 900 : 400);
+          }
+          /* Chờ Gemini xử lý xong ảnh (nút gửi chỉ bật khi upload hoàn tất) trước khi gõ đề. */
+          const attachDeadline = Date.now() + 6000;
+          while (Date.now() < attachDeadline && countPendingAttachments() < chipsBefore + inboundImages.length) {
+            await sleepB(300);
+          }
+          if (countPendingAttachments() < chipsBefore + 1) {
+            console.warn('[EduNext Bridge] ⚠️ Ảnh đề không bám được vào khung chat — Gemini có thể giải thiếu dữ liệu hình!');
+            notifyAll(id => reportStatus(id, 'UPLOADING_IMAGE', 'Ảnh đề chưa xác nhận được trên Gemini, vẫn gửi đề bài...'));
+          }
+          await sleepB(600);
         }
 
         setBadge('🌉 Đang nhập prompt vào Gemini...', '#06b6d4');
@@ -2187,14 +2462,70 @@
         notifyAll(id => reportStatus(id, 'SENDING', 'Đang bấm gửi đề bài...'));
         const sendOk = await clickSend(input);
         if (!sendOk) {
-          console.warn('[EduNext Bridge] clickSend chưa xác nhận thành công, tiếp tục theo dõi phản hồi...');
+          console.warn('[EduNext Bridge] clickSend chưa xác nhận thành công, sẽ kiểm tra lại tin nhắn thật sự đi hay chưa.');
+        }
+
+        /* Xác nhận tin nhắn đã thực sự rời khỏi khung soạn thảo.
+           Sau khi upload ảnh, nút gửi có thể chưa bật và cú click bị nuốt: không kiểm
+           tra thì script ngồi chờ 150s vô ích rồi báo lỗi mà không biết lý do. */
+        const confirmSent = async (deadlineMs) => {
+          const until = Date.now() + deadlineMs;
+          while (Date.now() < until) {
+            await sleepB(400);
+            if (getModelResponseElements().length > baselineCount) return true;
+            if (countUserTurns() > baselineUserTurns) return true;
+          }
+          return false;
+        };
+
+        let sentConfirmed = await confirmSent(12000);
+        if (!sentConfirmed) {
+          console.warn('[EduNext Bridge] Tin nhắn chưa rời khung soạn thảo — gửi lại lượt 2...');
+          notifyAll(id => reportStatus(id, 'SENDING', 'Chưa xác nhận được tin nhắn đã gửi, đang gửi lại...'));
+          try {
+            const boxNow = ((editorEl.textContent || editorEl.value || '') || '').trim();
+            if (boxNow.length < 10) await doInject(await findInput() || input, req.prompt);
+            await sleepB(400);
+            await clickSend(input);
+          } catch (e) {
+            console.warn('[EduNext Bridge] Gửi lại thất bại:', e && e.message);
+          }
+          sentConfirmed = await confirmSent(10000);
+        }
+
+        if (!sentConfirmed) {
+          console.error('[EduNext Bridge] Không đưa được câu hỏi lên Gemini sau 2 lượt gửi.');
+          setBadge('🌉 Lỗi: Gemini không nhận được câu hỏi', '#ef4444');
+          updateGeminiTabTitle('[❌ Gửi thất bại]');
+          notifyAll(id => {
+            reportStatus(id, 'ERROR', 'Gemini không nhận được câu hỏi (nút gửi không phản hồi)');
+            sendResponse(id, null, 'SEND_FAILED: message never left the composer', pHash);
+          });
+          return;
         }
         await sleepB(600);
 
         setBadge('🌉 Đang chờ Gemini sinh đáp án...', '#818cf8');
         updateGeminiTabTitle('[🧠 Đang giải...]');
         notifyAll(id => reportStatus(id, 'WAITING', 'Đang chờ mô hình Gemini phân tích và giải đề...'));
-        const response = await waitForResponse(baselineCount, baselineText, reqId);
+        const response = await waitForResponse(baselineCount, baselineText, reqId, 150000);
+
+        if (!response || response.length <= 3) {
+          /* Gemini không sinh ra nội dung (hết quota, mất mạng, bị chặn). Báo lỗi rõ
+             để phía EduNext thử lại thay vì tưởng đã có đáp án rỗng. */
+          console.warn('[EduNext Bridge] Không nhận được nội dung trả lời từ Gemini.');
+          setBadge('🌉 Lỗi: Gemini không trả lời', '#ef4444');
+          updateGeminiTabTitle('[❌ Không có đáp án]');
+          notifyAll(id => {
+            reportStatus(id, 'ERROR', 'Gemini không sinh ra nội dung trả lời');
+            sendResponse(id, null, 'GEMINI_EMPTY_RESPONSE', pHash);
+          });
+          WorkerTimer.setTimeout(() => {
+            setBadge('🌉 EduNext Bridge: Sẵn sàng', '#10b981');
+            updateGeminiTabTitle('[🟢 Sẵn sàng]');
+          }, 4000);
+          return;
+        }
 
         console.log(`[EduNext Bridge] Hoàn thành! Đáp án: ${(response || '').substring(0, 80)}`);
         setBadge('✅ Đã gửi đáp án về EduNext!', '#10b981');
@@ -2411,13 +2742,17 @@
           .then(async res => {
             if (timer) clearTimeout(timer);
             if (isAborted) return;
-            const txt = await res.text();
+            const isBuf = details.responseType === 'arraybuffer';
+            const isBlob = details.responseType === 'blob';
+            const binResp = isBuf ? await res.arrayBuffer() : (isBlob ? await res.blob() : null);
+            const txt = isBuf || isBlob ? '' : await res.text();
             if (typeof details.onload === 'function') {
               details.onload({
                 readyState: 4,
                 status: res.status,
                 statusText: res.statusText,
                 responseText: txt,
+                response: binResp,
                 finalUrl: res.url
               });
             }
@@ -2434,6 +2769,11 @@
       try {
         activeXhr = new XMLHttpRequest();
         activeXhr.open(method, details.url, true);
+        /* Phải tôn trọng responseType, nếu không ảnh nhị phân (PNG đề bài) sẽ về dưới dạng
+           chuỗi rác và mọi lần tải ảnh đều thất bại im lặng. */
+        if (details.responseType && details.responseType !== 'text') {
+          try { activeXhr.responseType = details.responseType; } catch (_) {}
+        }
         if (details.timeout) activeXhr.timeout = details.timeout;
         if (details.headers) {
           for (const [k, v] of Object.entries(details.headers)) {
@@ -2450,7 +2790,8 @@
               readyState: 4,
               status: activeXhr.status,
               statusText: activeXhr.statusText,
-              responseText: activeXhr.responseText,
+              responseText: activeXhr.responseType === 'arraybuffer' || activeXhr.responseType === 'blob' ? '' : activeXhr.responseText,
+              response: activeXhr.response,
               responseHeaders: activeXhr.getAllResponseHeaders ? activeXhr.getAllResponseHeaders() : '',
               finalUrl: activeXhr.responseURL || details.url
             });
@@ -2572,7 +2913,12 @@
     apiKeyLocked: false,
     selectedModel: CONFIG.DEFAULT_MODEL,
     availableModels: [...CONFIG.FALLBACK_MODELS],
-    aiMode: (typeof GM_getValue === 'function' ? GM_getValue('EDUNEXT_AI_MODE', null) : null) || (typeof localStorage !== 'undefined' ? localStorage.getItem('EDUNEXT_AI_MODE') : null) || 'api',
+    aiMode: (typeof GM_getValue === 'function' ? GM_getValue('EDUNEXT_AI_MODE', null) : null) || (typeof localStorage !== 'undefined' ? localStorage.getItem('EDUNEXT_AI_MODE') : null) || 'bridge',
+    /* Model sẽ ép chọn trên tab Gemini (Pro + Suy luận nâng cao cho câu khó).
+       Đổi được bằng GM_setValue('EDUNEXT_GEMINI_MODEL', '3.5 Flash') nếu muốn nhanh hơn. */
+    geminiModelPref: (typeof GM_getValue === 'function' ? GM_getValue('EDUNEXT_GEMINI_MODEL', null) : null) || (typeof localStorage !== 'undefined' ? localStorage.getItem('EDUNEXT_GEMINI_MODEL') : null) || '3.1 Pro',
+    geminiModelReady: false,
+    geminiModelApplied: '',
     duckModel: (typeof GM_getValue === 'function' ? GM_getValue('EDUNEXT_DUCK_MODEL', null) : null) || (typeof localStorage !== 'undefined' ? localStorage.getItem('EDUNEXT_DUCK_MODEL') : null) || 'gpt-4o-mini',
     duckVQD: null,
     duckVQDHash: null,
@@ -2631,43 +2977,34 @@
     notebookEntries: []
   };
 
-  const _VAULT_SEED = "BroAmStuck_Studio_Core_KeyVault_2026";
-  const _VAULT_DATA = [
-    '263b6f165c305b202120befb8be3b7e1cbe9fdb1b3ab643e42635b120b0322557386dac885ecb3b7c6bbf3e3a95e2a7c63703a4559344e7d6fddf38ff8ada29f91bdfd93550a1b7108',
-    '263b6f165c305b202124bcf7ddeae3b39abaa6b2e7ae34674e6202160e0e715171d7dbccd8eeb7b7c6b0f4b2ae55772c64743d430567187e38defb8facfef1ce9aebfc9100091b255b',
-    '14016c384c257f5f3a5aa880bd83b99ad0e4eceacbcb1f2b346b53786b79747d12c88ffe97948fc7fbfdd3bdd73b7d102b3d317e6d',
-    '14016c384c257f5f3a5b92b58bb49ca0eebba8ffacce24294d293a161360567801edd1e5d99fb7d5caf8c3efaa32027a11133c765b',
-    '14016c384c257f5f3a5ba08c9a89bcb1d9eaace8e6aa1826283619714a0b5a0602e4ddd48e9a97efd2e6a7b5ef0979392a2d68504b',
-    '263b1d4d1c4d687245259bf098e6a28dcdd9aed7c8ff041122670e515a56604709f7cb',
-    '263b1d2943566f2666559f908d9e8091cdc5d9e3b7f60e674a6b3673705d5345128ad7',
-    '263b1d3e5d454f5d63269b8d819690bdc4ebd6cfeed41f0c3e6b2d180d5c7a7f71c0c9',
-    '14016c384c257f5f3a5bb7f58be4f89ae6dcefbfe3c8221c1b63124e6c5c62707483d8dfb8aaafb3cdd1d0f7a03d277e230a16425b',
-    '14016c384c257f5f3a5d89f3b9e4a693d0e1afded6f53f0c201819574b724d7e74ca8ec9908beedc9bc2f6cdfb2618273c1e0d184b',
-    '14016c384c257f5f3a5b9c918791e2969be9dbc1f3c40e1b3b2515427617606b74c8eafa98b0b4fdd6b0f8efa9182c363e2d37114b',
-    '14016c384c257f5f3a5a8c90acb6b2e5dfe9e7d0d0fe09133e14326573432c7213f4f083d6e4bfb2cedcdde3cd37257c1b041f186d',
-    '14016c384c257f5f3a5dbcb5dd8b8696ebdaf0cdc9c12c6b1d1c35167d08570228d4fede8def93b7dac3d8fff3253e78182f0e7b6d',
-    '14016c384c257f5f3a5abd97ace4a2b298a0f9fdd2f7322a2027374b490a5c0b06e4f997b088a0e8d1e5c1bda10b25040b34167e5b',
-    '14016c384c257f5f3a5b8aa598bb9b9c85ebd3e6f2cc0c140e320b73720a77562ef386eb89999be6dbefa7e9e202251526242d745b',
-    '14016c384c257f5f3a5b9c9aa1a1e6b3dcf5fdf4f9f01f0f432214446d4e536408ffc79aa59e94c7f4e4e5cca85f0323097435425b',
-    '14016c384c257f5f3a58ecf1999f849fc7e6f4d5d5d67b0f321e04544e50567c11fbe59ba88fb1d7f8def5c0d53c0a163d6a21577d',
-    '14016c384c257f5f3a5aed8ddeb699f89dd4fbcbc6e93d6c303b11694c6e4f4016d0f9c1abadfbf2c3fcdff0de173c7935063a595b',
-    '14016c384c257f5f3a588291abe08ab2dbffacf1d6a21e15196b3b60646d720502cad5cfa48386df94e7cec0e05d003d3a3638717d',
-    '14016c384c257f5f3a5ab184b5e6a09dfae6d2d2f0ac35134e630f707a752c743fe3dd968fae9df0c1b1e2cfdc3d7b153a7713436d',
-    '14016c384c257f5f3a5d8ca8c28ae790cfe3c4ceefab3307281a0550666f435f73dcc8ff89f19ccac0d8d0d4cb2a2f37642328735b'
-  ];
-  function _unpackVaultKey(hex, seed) {
-    let str = '';
-    for (let i = 0; i < hex.length; i += 2) {
-      const b = parseInt(hex.substr(i, 2), 16);
-      const idx = i / 2;
-      const k = seed.charCodeAt(idx % seed.length);
-      str += String.fromCharCode((b ^ k ^ ((idx * 11 + 23) & 0xFF)) & 0xFF);
+  /* Bản ULTRA: engine duy nhất là Cross-Tab Gemini Bridge.
+     Mọi cấu hình 'api' cũ trong storage được tự động chuyển về 'bridge' để không rơi vào tuyến key đã gỡ. */
+  /* Chỉ giữ crosstab: mọi giá trị mode khác (api / gogoduck / rác từ bản cũ) đều bị ép về bridge. */
+  if (STATE.aiMode !== 'bridge') STATE.aiMode = 'bridge';
+
+  /* Bản ULTRA (01/11/2026): ĐÃ GỠ TOÀN BỘ API KEY NHÚNG SẴN trong script.
+     Tuyến giải duy nhất là Cross-Tab Gemini Bridge (tab gemini.google.com thật).
+     Không còn bất kỳ key hệ thống nào để lộ, để hết quota hay bị thu hồi. */
+  const BUILTIN_KEYS = Object.freeze([]);
+
+  /* XOÁ KEY CŨ ĐÃ LƯU: bản cũ từng lưu key người dùng trong GM/localStorage.
+     Giờ chỉ dùng crosstab nên dọn sạch để không còn key nào nằm trong máy. */
+  function purgeStoredKeys() {
+    const fields = ['EDUNEXT_USER_KEY_POOL', 'EDUNEXT_USER_API_KEY', 'EDUNEXT_API_KEY', 'EDUNEXT_ACTIVE_MODEL'];
+    for (const f of fields) {
+      try { if (typeof GM_setValue === 'function') GM_setValue(f, ''); } catch (_) {}
+      try { if (typeof localStorage !== 'undefined') localStorage.removeItem(f); } catch (_) {}
+      try { if (typeof sessionStorage !== 'undefined') sessionStorage.removeItem(f); } catch (_) {}
     }
-    return str;
   }
-  const BUILTIN_KEYS = Object.freeze(_VAULT_DATA.map(h => _unpackVaultKey(h, _VAULT_SEED)));
+  try { purgeStoredKeys(); } catch (_) {}
 
   function loadUserKeyPool() {
+    /* Crosstab-only: không đọc/không dùng key ở bất kỳ đâu nữa. */
+    return [];
+  }
+
+  function loadUserKeyPoolLegacy() {
     try {
       let keys = [];
       let rawGM = null;
@@ -2705,7 +3042,12 @@
     }
   }
 
-  function saveUserKeyPool(pool) {
+  function saveUserKeyPool() {
+    /* Crosstab-only: không lưu key nữa, và luôn dọn sạch key còn sót. */
+    try { purgeStoredKeys(); } catch (_) {}
+  }
+
+  function saveUserKeyPoolLegacy(pool) {
     try {
       const cleanList = [];
       const seen = new Set();
@@ -2730,14 +3072,9 @@
     } catch (_) {}
   }
 
-  STATE.userKeyPool = loadUserKeyPool();
-  if (STATE.userKeyPool.length > 0) {
-    STATE.apiKey = STATE.userKeyPool[0];
-    STATE.apiKeyLocked = true;
-  } else {
-    STATE.apiKey = BUILTIN_KEYS[0];
-    STATE.apiKeyLocked = false;
-  }
+  STATE.userKeyPool = [];
+  STATE.apiKey = '';
+  STATE.apiKeyLocked = false;
 
   try {
     if (typeof GM_addValueChangeListener === 'function') {
@@ -5627,14 +5964,61 @@
       log('VISION', `Đang chuẩn bị dữ liệu câu hỏi [${candidate.source || 'universal'}]: "${combinedText.substring(0, 60)}..."`);
 
       let allImages = [];
+      let allImageUrls = [];
+      const collectUrls = (el) => {
+        try {
+          (el.querySelectorAll ? el.querySelectorAll('img') : []).forEach((im) => {
+            const u = im.currentSrc || im.src || im.getAttribute('data-src') || '';
+            if (u && /^https?:/i.test(u) && !/avatar|icon|logo|emoji|badge/i.test(u)) {
+              if (im.naturalWidth >= 120 && im.naturalHeight >= 90) allImageUrls.push(u);
+            }
+          });
+        } catch (_) {}
+      };
       if (turnLastEl) {
         allImages = await this.extractImages(turnLastEl);
+        collectUrls(turnLastEl);
       }
       for (const m of turnMsgs) {
         if (m.element && m.element !== turnLastEl) {
           const imgs = await this.extractImages(m.element);
           allImages = allImages.concat(imgs);
+          collectUrls(m.element);
         }
+      }
+      allImageUrls = Array.from(new Set(allImageUrls)).slice(0, 3);
+      /* Lưới an toàn: nếu vẫn chưa có ảnh nào, quét toàn bộ khung chat tìm ảnh đề bài
+         (URL dạng .../images/crop_image_*.png là ảnh đề bài, không lẫn icon/avatars). */
+      if (!allImages.length && !allImageUrls.length) {
+        try {
+          /* Ảnh đề bài thường nằm ở khung bài tập BÊN NGOÀI tin nhắn chat, và endpoint
+             ai-gw trả ảnh cắt đề không có đuôi file (…/images/crop_image_<hash>),
+             nên chỉ so khớp đuôi .png sẽ bỏ sót sạch. */
+          const isQuestionImg = (u) =>
+            /\/images\/(?:crop_|img_)?[\w-]+\.(?:png|jpe?g|webp)/i.test(u)
+            || (/ai-gw\.fpt\.edu\.vn/i.test(u) && /\/images\//i.test(u));
+          const all = [...document.querySelectorAll('img')];
+          for (const im of all) {
+            const u = im.currentSrc || im.src || '';
+            if (!u || !isQuestionImg(u)) continue;
+            if (/avatar|icon|logo|emoji|badge/i.test(u)) continue;
+            if (im.naturalWidth >= 120 && im.naturalHeight >= 80) allImageUrls.push(u);
+          }
+          allImageUrls = Array.from(new Set(allImageUrls)).slice(-3);
+          if (allImageUrls.length) log('VISION', `🛟 Lưới an toàn: tìm thấy ${allImageUrls.length} ảnh đề bài ngoài khung tin nhắn`);
+        } catch (_) {}
+      }
+      /* Đã có URL nhưng chưa có base64: tải ngay thành base64 để ảnh đi kèm gói tin.
+         Chỉ gửi URL là rủi ro — tab Gemini bị CORS chặn nên có thể không tải được ảnh,
+         và đề dạng ảnh khi đó sang Gemini trống trơn. */
+      if (!allImages.length && allImageUrls.length) {
+        for (const u of allImageUrls) {
+          try {
+            const b64 = await this.fetchImgBase64(u);
+            if (b64 && b64.length > 200) allImages.push(b64);
+          } catch (_) {}
+        }
+        if (allImages.length) log('VISION', `🖼 Đã tải ${allImages.length}/${allImageUrls.length} ảnh đề về base64 để gửi kèm`);
       }
       if (turnLastEl) {
         try {
@@ -5736,6 +6120,7 @@
         forbidNumerical: forbidNumerical,
         botHint: extractedBotHint,
         images: allImages,
+        imageUrls: allImageUrls,
         lessonContext: lessonCtx,
         bottomContext: bottomCtx,
         source: candidate.source || 'universal',
@@ -5813,28 +6198,92 @@
       return images;
     },
 
-    fetchImgBase64(url) {
+    /* Tải ảnh đề về base64.
+       Trước đây chỉ dùng GM_xmlhttpRequest với responseType arraybuffer — nếu bản shim
+       (chế độ dán console) bỏ qua responseType thì ảnh luôn null và đề sang Gemini
+       mất sạch hình. Nay thử lần lượt nhiều đường, đường nào được thì dùng:
+       1) fetch thường (ai-gw cho phép CORS, KHÔNG gửi credentials — đã kiểm chứng 200)
+       2) Image crossOrigin=anonymous + canvas (bỏ qua ảnh bị nhiễm bẩn canvas)
+       3) GM_xmlhttpRequest (dùng khi fetch bị CORS chặn, vd. tab Gemini) */
+    async fetchImgBase64(url) {
+      if (!url || typeof url !== 'string') return null;
+      if (url.startsWith('data:')) return url;
+
+      const dataUrlFromBlob = (blob) => new Promise(res => {
+        if (!blob || !blob.size || blob.size < 50) return res(null);
+        try {
+          const fr = new FileReader();
+          fr.onloadend = () => res(typeof fr.result === 'string' ? fr.result : null);
+          fr.onerror = () => res(null);
+          fr.readAsDataURL(blob);
+        } catch (_) { res(null); }
+      });
+
+      try {
+        const r = await fetch(url, { credentials: 'omit', mode: 'cors', cache: 'force-cache' });
+        if (r.ok) {
+          const blob = await r.blob();
+          /* URL ảnh cũ/hết hạn trả 404 kèm JSON — chỉ nhận đúng ảnh thật,
+             không thì Gemini nhận "tệp ảnh" là trang lỗi. */
+          if (!blob.type || /^image\//i.test(blob.type)) {
+            const d = await dataUrlFromBlob(blob);
+            if (d && /^data:image\//i.test(d)) return d;
+          }
+        }
+      } catch (_) {}
+
+      try {
+        if (typeof Image !== 'undefined') {
+          const viaCanvas = await new Promise(res => {
+            const img = new Image();
+            img.crossOrigin = 'anonymous';
+            let done = false;
+            const finish = (v) => { if (!done) { done = true; res(v); } };
+            const t = setTimeout(() => finish(null), 8000);
+            img.onload = () => {
+              clearTimeout(t);
+              try {
+                const c = document.createElement('canvas');
+                c.width = img.naturalWidth; c.height = img.naturalHeight;
+                if (!c.width || !c.height) return finish(null);
+                c.getContext('2d').drawImage(img, 0, 0);
+                finish(c.toDataURL('image/png'));
+              } catch (_) { finish(null); }
+            };
+            img.onerror = () => { clearTimeout(t); finish(null); };
+            img.src = url;
+          });
+          if (viaCanvas && viaCanvas.length > 100) return viaCanvas;
+        }
+      } catch (_) {}
+
       return new Promise(resolve => {
-        GM_xmlhttpRequest({
-          method: 'GET', url, responseType: 'arraybuffer', timeout: 10000,
-          onload: (r) => {
-            try {
-              if (r.status >= 200 && r.status < 300 && r.response && r.response.byteLength > 50) {
-                const b64 = arrayBufferToBase64(r.response);
-                let mime = 'image/png';
-                const ct = r.responseHeaders ? r.responseHeaders.match(/content-type:\s*([^\r\n;]+)/i) : null;
-                if (ct && ct[1]) {
-                  const parsed = ct[1].trim().toLowerCase();
-                  if (parsed.startsWith('image/')) mime = parsed;
+        try {
+          if (typeof GM_xmlhttpRequest !== 'function') return resolve(null);
+          GM_xmlhttpRequest({
+            method: 'GET', url, responseType: 'arraybuffer', timeout: 12000,
+            onload: async (r) => {
+              try {
+                if (r.status >= 200 && r.status < 300 && r.response && r.response.byteLength > 50) {
+                  const b64 = arrayBufferToBase64(r.response);
+                  let mime = 'image/png';
+                  const ct = r.responseHeaders ? r.responseHeaders.match(/content-type:\s*([^\r\n;]+)/i) : null;
+                  if (ct && ct[1]) {
+                    const parsed = ct[1].trim().toLowerCase();
+                    if (parsed.startsWith('image/')) mime = parsed;
+                  }
+                  return resolve(`data:${mime};base64,${b64}`);
                 }
-                resolve(`data:${mime};base64,${b64}`);
-                return;
-              }
-              resolve(null);
-            } catch (_) { resolve(null); }
-          },
-          onerror: () => resolve(null), ontimeout: () => resolve(null)
-        });
+                if (r.status >= 200 && r.status < 300 && typeof r.responseText === 'string' && r.responseText.length > 200) {
+                  const d = await dataUrlFromBlob(new Blob([r.responseText]));
+                  return resolve(d);
+                }
+                resolve(null);
+              } catch (_) { resolve(null); }
+            },
+            onerror: () => resolve(null), ontimeout: () => resolve(null)
+          });
+        } catch (_) { resolve(null); }
       });
     },
 
@@ -6516,8 +6965,21 @@ LỊCH SỬ CÁC CÂU HỎI VỪA HOÀN THÀNH TRONG BÀI HỌC (tham khảo ti�
       const botFeedback = (STATE.lastBotFeedbackText || qd.botFeedback || '').trim();
 
       /* Truong hop cau hoi co hinh anh: Chi gui anh va loi yeu cau giai bai, tuyet doi khong gui ma code UI rac */
-      if (qd.images && qd.images.length > 0) {
+      const hasImgNow = !!((qd.images && qd.images.length > 0) || (qd.imageUrls && qd.imageUrls.length > 0));
+      if (hasImgNow) {
         let p = 'Chào bạn, hãy quan sát kỹ toàn bộ đề bài và dữ liệu trong hình ảnh đính kèm ở trên để giải giúp mình nhé.\n';
+        /* Ảnh có thể bị cắt/che/mất nhãn (A), (B)... trong khi phần chữ của đề lại có.
+           Trước đây nhánh này bỏ hết chữ nên Gemini giải thiếu dữ liệu. */
+        try {
+          const rawTextQ = (qd.questionText || qd.text || '').trim();
+          const splitQ = domScraper.splitFeedbackAndQuestion ? domScraper.splitFeedbackAndQuestion(rawTextQ) : null;
+          let textQ = (splitQ && splitQ.question && splitQ.question.length > 20) ? splitQ.question : rawTextQ;
+          if (domScraper.cleanQuestionText) textQ = domScraper.cleanQuestionText(textQ);
+          const junkQ = !textQ || textQ.length < 40
+            || /^(?:đang\s*(?:phân\s*tích|xử\s*lý|tải|chờ|suy\s*nghĩ)|loading|processing)[\.\s…]*$/i.test(textQ)
+            || (domScraper.isPureFeedbackText && domScraper.isPureFeedbackText(textQ));
+          if (!junkQ) p += 'NỘI DUNG ĐỀ (trích nguyên văn từ trang, đối chiếu với hình khi giải):\n' + textQ + '\n';
+        } catch (_) {}
         if (effectiveHint && effectiveHint.length > 5 && effectiveHint !== botFeedback) {
           p += 'Gợi ý của bài: ' + effectiveHint + '\n';
         }
@@ -6696,31 +7158,30 @@ LỊCH SỬ CÁC CÂU HỎI VỪA HOÀN THÀNH TRONG BÀI HỌC (tham khảo ti�
       return this.solveViaApiKey(qd);
     },
 
-    async solveViaApiKey(qd) {
-      if (STATE.userKeyPool.length > 0) {
-        log('AI', `👑 Tuyến 1: Sử dụng Bể chứa Key cá nhân (${STATE.userKeyPool.length}/121 keys)...`);
-        const ans = await this.solveWithMultiKeyPool(qd, STATE.userKeyPool);
-        if (ans && ans.trim()) return ans;
+    async solveViaApiKey() {
+      /* ĐÃ GỠ: bản ULTRA chỉ dùng Cross-Tab Gemini Bridge. */
+      log('AI', '⛔ Tuyến Key API đã bị gỡ — chỉ dùng Cross-Tab Gemini Bridge.', 'warn');
+      return null;
+    },
 
-        log('AI', `⚠️ Toàn bộ Key cá nhân đang cạn quota (429)! Tự động chuyển sang Bể chứa ${BUILTIN_KEYS.length} Key Hệ Thống VIP giải cứu...`, 'warn');
-        const sysAns = await this.solveWithMultiKeyPool(qd, BUILTIN_KEYS);
-        if (sysAns && sysAns.trim()) return sysAns;
-
-        const builtinAns = await this.solveViaBuiltin(qd);
-        if (builtinAns && builtinAns.trim()) return builtinAns;
-
-        log('AI', '⚠️ Toàn bộ Key cá nhân và hệ thống đều đang cạn hạn mức (Quota 429). Giữ nguyên chế độ Key Api.', 'warn');
+    async solveViaApiKeyLegacy(qd) {
+      /* Bản ULTRA: không còn key hệ thống nhúng trong script.
+         Chỉ dùng key do chính người dùng tự nhập (nếu có); mặc định mọi lượt giải đi qua Cross-Tab Bridge. */
+      if (BUILTIN_KEYS.length === 0 && STATE.userKeyPool.length === 0) {
+        log('AI', '⛔ Bản ULTRA không nhúng API key nào. Tuyến giải duy nhất là 🌉 Cross-Tab Gemini Bridge.', 'warn');
         return null;
       }
-
-      log('AI', `⚡ Sử dụng Bể chứa ${BUILTIN_KEYS.length} Key Hệ Thống VIP (Plug & Play Sẵn Có - Không cần nhập Key)...`);
-      const sysAns = await this.solveWithMultiKeyPool(qd, BUILTIN_KEYS);
-      if (sysAns && sysAns.trim()) return sysAns;
-
-      const builtinAns = await this.solveViaBuiltin(qd);
-      if (builtinAns && builtinAns.trim()) return builtinAns;
-
-      log('AI', `⚠️ Toàn bộ ${BUILTIN_KEYS.length} Key Hệ Thống VIP đều đang cạn hạn mức (Quota 429). Giữ nguyên chế độ Key Api.`, 'warn');
+      if (STATE.userKeyPool.length > 0) {
+        log('AI', `👑 Tuyến dự phòng: Bể chứa Key cá nhân do bạn tự nhập (${STATE.userKeyPool.length} keys)...`);
+        const ans = await this.solveWithMultiKeyPool(qd, STATE.userKeyPool);
+        if (ans && ans.trim()) return ans;
+        log('AI', '⚠️ Key cá nhân đã cạn hạn mức (Quota 429) — quay về tuyến Cross-Tab Bridge.', 'warn');
+        return null;
+      }
+      if (BUILTIN_KEYS.length > 0) {
+        const sysAns = await this.solveWithMultiKeyPool(qd, BUILTIN_KEYS);
+        if (sysAns && sysAns.trim()) return sysAns;
+      }
       return null;
     },
 
@@ -7264,7 +7725,7 @@ CÁC QUY TẮC SỐNG CÒN BẮT BUỘC TUÂN THỦ:
 XÁC NHẬN: Bạn đã hiểu rõ toàn bộ vai trò và quy tắc THPT trên chưa? Hãy xác nhận ngắn gọn để chúng ta bắt đầu giải bài tập!`;
     },
 
-    executeBridgeTurn(promptText, img, turn, maxTimeoutMs = 65000, coreText = '', forceNew = false) {
+    async executeBridgeTurn(promptText, img, turn, maxTimeoutMs = 65000, coreText = '', forceNew = false, imgUrls = []) {
       function computeSimpleHash(str) {
         let h = 0;
         for (let i = 0; i < str.length; i++) {
@@ -7276,6 +7737,27 @@ XÁC NHẬN: Bạn đã hiểu rõ toàn bộ vai trò và quy tắc THPT trên 
       const pHash = computeSimpleHash(promptText.trim());
       const coreKey = coreText ? computeSimpleHash(coreText.slice(0, 4000)) : '';
 
+      /* Gửi TẤT CẢ ảnh của đề (tối đa 3) thay vì chỉ ảnh đầu, để câu hỏi nhiều hình không bị mất dữ liệu.
+         Ảnh nén lại trước khi gửi để gói JSON không quá lớn (gói lớn từng làm mất ảnh khi
+         truyền qua GM storage giữa 2 tab khác origin). */
+      const imgList = (Array.isArray(img) ? img : (img ? [img] : []))
+        .filter(x => typeof x === 'string' && x.length > 50)
+        .slice(0, 3);
+      const urlList = (Array.isArray(imgUrls) ? imgUrls : [])
+        .filter(x => typeof x === 'string' && x.length > 10)
+        .slice(0, 3);
+
+      /* Gửi kèm CẢ base64 nén (nguồn chính — tab Gemini bị CORS chặn nên nhiều khi không
+         tải được ảnh từ URL) LẪN URL (dự phòng). */
+      const shrink = async (list, maxDim, quality) => {
+        const out = [];
+        for (const u of list) {
+          try { out.push(await compressBase64Image(u, maxDim, quality)); } catch (_) { out.push(u); }
+        }
+        return out;
+      };
+      let inlineForSend = await shrink(imgList, 1280, 0.82);
+
       const reqId = generateUUID();
       const reqObj = {
         id: reqId,
@@ -7284,12 +7766,31 @@ XÁC NHẬN: Bạn đã hiểu rõ toàn bộ vai trò và quy tắc THPT trên 
         seq: Date.now(),
         timestamp: Date.now(),
         prompt: promptText,
-        imageBase64: img,
+        imageBase64: inlineForSend[0] || null,
+        images: inlineForSend,
+        imageUrls: urlList,
         turn: turn,
         coreKey: coreKey,
         forceNew: !!forceNew
       };
-      const reqJson = JSON.stringify(reqObj);
+      let reqJson = JSON.stringify(reqObj);
+      /* Gói quá lớn: NÉN LẠI mạnh hơn chứ KHÔNG xoá ảnh.
+         Xoá ảnh = Gemini giải đề dạng ảnh mà không thấy hình, tức là mất dữ kiện gốc.
+         Chỉ khi vẫn quá lớn mới cắt bớt số ảnh (luôn giữ ảnh đầu tiên). */
+      const LIMIT = 900000;
+      const levels = [[1280, 0.8], [1100, 0.7], [900, 0.6], [760, 0.5]];
+      for (const [dim, q] of levels) {
+        if (reqJson.length <= LIMIT) break;
+        inlineForSend = await shrink(imgList, dim, q);
+        reqObj.images = inlineForSend;
+        reqObj.imageBase64 = inlineForSend[0] || null;
+        reqJson = JSON.stringify(reqObj);
+      }
+      while (reqJson.length > LIMIT * 2 && reqObj.images.length > 1) {
+        reqObj.images = reqObj.images.slice(0, reqObj.images.length - 1);
+        reqObj.imageBase64 = reqObj.images[0] || null;
+        reqJson = JSON.stringify(reqObj);
+      }
 
       try {
         if (typeof GM_setValue === 'function') {
@@ -7518,17 +8019,19 @@ XÁC NHẬN: Bạn đã hiểu rõ toàn bộ vai trò và quy tắc THPT trên 
           log('BRIDGE', '⚠️ Prompt Bridge không hợp lệ hoặc đang ở trạng thái loading, hủy lượt gửi.', 'warn');
           return null;
         }
-        const img = qd.images?.[0] || null;
-        log('BRIDGE', `🌉 Gửi đề bài qua Cross-Tab Bridge (Lượt #${STATE.bridgeSessionPromptCount}, ${img ? 'Kèm hình ảnh' : 'Chỉ văn bản'})...`);
+        const imgs = (qd.images || []).filter(x => typeof x === 'string' && x.length > 50).slice(0, 3);
+        const imgUrls = (qd.imageUrls || []).filter(x => typeof x === 'string' && x.length > 10).slice(0, 3);
+        const imgCount = imgs.length + imgUrls.length;
+        log('BRIDGE', `🌉 Gửi đề bài qua Cross-Tab Bridge (Lượt #${STATE.bridgeSessionPromptCount}, ${imgCount > 1 ? `Kèm ${imgCount} hình ảnh` : (imgCount === 1 ? 'Kèm hình ảnh' : 'Chỉ văn bản')})...`);
 
-        const ans = await this.executeBridgeTurn(promptText, img, STATE.bridgeSessionPromptCount, 65000, coreText, isRetryingTurn);
+        const ans = await this.executeBridgeTurn(promptText, imgs, STATE.bridgeSessionPromptCount, 150000, coreText, isRetryingTurn, imgUrls);
         if (ans) {
           const isRefusal = this.isRefusalOrJunkAnswer(ans);
           if (isRefusal) {
             log('BRIDGE', '⚠️ Tab Gemini kích hoạt câu từ chối an toàn! Đang làm sạch đề bài và tự động thử lại lượt 2...', 'warn');
             const cleanQ = domScraper.cleanQuestionText ? domScraper.cleanQuestionText(qd.questionText || qd.text || '') : (qd.text || '');
             const fallbackPrompt = 'Chào bạn, bạn vui lòng hướng dẫn giải câu hỏi học tập THPT này giúp mình nhé:\n\n' + cleanQ + '\n\nYêu cầu xuất theo định dạng: Trả lời: <đáp án>';
-            const retryAns = await this.executeBridgeTurn(fallbackPrompt, null, STATE.bridgeSessionPromptCount + 1, 45000);
+            const retryAns = await this.executeBridgeTurn(fallbackPrompt, null, STATE.bridgeSessionPromptCount + 1, 90000, '', false, imgUrls);
             if (retryAns && !/mô\s*hình\s*ngôn\s*ngữ/i.test(retryAns)) {
               log('BRIDGE', `✅ Lượt 2 thử lại với đề sạch thành công: "${retryAns.substring(0, 80)}..."`);
               recordBridgeAnswer(retryAns);
@@ -7549,6 +8052,25 @@ XÁC NHẬN: Bạn đã hiểu rõ toàn bộ vai trò và quy tắc THPT trên 
       } finally {
         STATE.isBridgeInFlight = false;
       }
+    },
+
+    /* Chuẩn hoá đáp án trước khi nộp vào EduNext.
+       Gemini hay trả cả bài giải dài; EduNext chỉ chấm được khi có dòng "Trả lời:".
+       - Câu tự luận: giữ nguyên bài (không được cắt).
+       - Câu còn lại: ưu tiên dòng "Trả lời:" (hoặc "ĐÁP ÁN:") có sẵn, không có thì
+         giữ nguyên nhưng bảo đảm có tiền tố. */
+    normalizeBridgeAnswer(raw, qd) {
+      let s = String(raw || '').trim();
+      if (!s) return s;
+      s = s.replace(/```[a-zA-Z]*\s*/g, '').trim();
+      const isEssay = qd && (qd.questionType === 'ESSAY' || /TỰ\s*LUẬN/i.test(qd.questionType || ''));
+      if (isEssay) return /^\s*Trả\s*lời\s*:/i.test(s) ? s : ('Trả lời: ' + s);
+      if (/^\s*Trả\s*lời\s*:/i.test(s)) return s;
+      const line = /(?:^|\n)\s*(Trả\s*lời\s*:[^\n]+)/i.exec(s);
+      if (line) return line[1].trim();
+      const ans = /(?:^|\n)\s*(?:ĐÁP\s*ÁN|Đáp\s*án)\s*[:：]\s*([^\n]+)/i.exec(s);
+      if (ans) return 'Trả lời: ' + ans[1].trim();
+      return s;
     },
 
     async getDuckChatVQD() {
@@ -7716,7 +8238,13 @@ XÁC NHẬN: Bạn đã hiểu rõ toàn bộ vai trò và quy tắc THPT trên 
       });
     },
 
-    async solveViaGogoDuck(qd) {
+    async solveViaGogoDuck() {
+      /* ĐÃ GỠ: không gọi API ngoài (DuckDuckGo/Pollinations) trong bản chỉ-crosstab. */
+      log('AI', '⛔ Tuyến AI ngoài (DuckDuckGo) đã bị gỡ — chỉ dùng Cross-Tab Gemini Bridge.', 'warn');
+      return null;
+    },
+
+    async solveViaGogoDuckLegacy(qd) {
       const selectedModel = STATE.duckModel || 'gpt-4o-mini';
       log('FREE_AI', `🦆 [Free AI Engine] Đang xử lý câu hỏi qua Động cơ AI Miễn Phí (Không giới hạn Quota, 0 cần Key)...`);
       const prompt = this.buildCondensedBridgePrompt(qd);
@@ -8030,7 +8558,9 @@ XÁC NHẬN: Bạn đã hiểu rõ toàn bộ vai trò và quy tắc THPT trên 
           return;
         }
         STATE.bridgeFailCount = 0;
-        STATE.currentAnswer = answer;
+        STATE.currentAnswer = (STATE.aiMode === 'bridge')
+          ? aiProvider.normalizeBridgeAnswer(answer, STATE.currentQuestion)
+          : answer;
         if (STATE.autoCopyAnswer) {
           try {
             if (typeof GM_setClipboard === 'function') {
@@ -9677,7 +10207,7 @@ XÁC NHẬN: Bạn đã hiểu rõ toàn bộ vai trò và quy tắc THPT trên 
       } else if (STATE.apiKey && STATE.apiKeyLocked) {
         st.innerHTML = `<div class="api-st ok" style="color:#10b981;font-size:10.5px">👑 API: Cá Nhân (VIP) | Model: ${STATE.selectedModel}</div>`;
       } else {
-        st.innerHTML = `<div class="api-st ok" style="color:#10b981;font-size:10.5px">⚡ API: ${BUILTIN_KEYS.length} Key Hệ Thống VIP Sẵn Có (Plug & Play) | Model: ${STATE.selectedModel}</div>`;
+        st.innerHTML = `<div class="api-st ok" style="color:#f59e0b;font-size:10.5px">⛔ API: Đã gỡ toàn bộ key nhúng — chỉ dùng 🌉 Cross-Tab Gemini Bridge</div>`;
       }
     }
 
@@ -9914,6 +10444,16 @@ XÁC NHẬN: Bạn đã hiểu rõ toàn bộ vai trò và quy tắc THPT trên 
     });
 
     const mApi = $('#mApi'), mDuck = $('#mDuck'), mBridge = $('#mBridge');
+    /* Bản chỉ-crosstab: ẩn hộp chứa key và tuyến AI ngoài để không ai nhập key vào nữa. */
+    try {
+      [mApi, mDuck].forEach((el) => {
+        if (!el) return;
+        el.style.display = 'none';
+        el.setAttribute('aria-hidden', 'true');
+      });
+      const keySec = $('#keySection');
+      if (keySec) keySec.style.display = 'none';
+    } catch (_) {}
     const keySection = $('#keySection'), duckBox = $('#duckInfoBox'), bridgeBox = $('#bridgeInfoBox');
     const duckModelSel = $('#duckModelSel');
 
@@ -9930,7 +10470,12 @@ XÁC NHẬN: Bạn đã hiểu rõ toàn bộ vai trò và quy tắc THPT trên 
       });
     }
 
-    const setMode = (mode) => {
+    const setMode = (requestedMode) => {
+      /* Bản chỉ-crosstab: ép mọi lựa chọn về bridge, các tab khác không còn tác dụng. */
+      const mode = 'bridge';
+      if (requestedMode !== 'bridge') {
+        log('SYS', 'ℹ️ Bản ULTRA chỉ dùng Cross-Tab Gemini Bridge — đã bỏ qua lựa chọn khác.', 'warn');
+      }
       STATE.aiMode = mode;
       try {
         if (typeof GM_setValue === 'function') GM_setValue('EDUNEXT_AI_MODE', mode);
@@ -9946,7 +10491,7 @@ XÁC NHẬN: Bạn đã hiểu rõ toàn bộ vai trò và quy tắc THPT trên 
       if (bridgeBox) bridgeBox.style.display = (mode === 'bridge') ? 'block' : 'none';
 
       if (mode === 'api') {
-        log('SYS', 'Chế độ AI: 🔑 Bể chứa 121 API Key Google Gemini');
+        log('SYS', 'Chế độ AI: 🔑 Bể chứa key CÁ NHÂN do bạn tự nhập (không có key nào nhúng trong script)');
       } else if (mode === 'gogoduck') {
         log('SYS', `Chế độ AI: 🦆 GogoDuck AI Engine 1-Tab (${STATE.duckModel || 'gpt-4o-mini'}) - Tự động swap khi có ảnh`);
       } else if (mode === 'bridge') {
@@ -9965,7 +10510,7 @@ XÁC NHẬN: Bạn đã hiểu rõ toàn bộ vai trò và quy tắc THPT trên 
     mDuck?.addEventListener('click', () => setMode('gogoduck'));
     mBridge?.addEventListener('click', () => setMode('bridge'));
 
-    setMode(STATE.aiMode || 'api');
+    setMode(STATE.aiMode || 'bridge');
 
     $('#bOpenGemini')?.addEventListener('click', () => {
       log('BRIDGE', '🚀 Mở tab gemini.google.com...');
@@ -11000,11 +11545,15 @@ body {
         try {
           const sysCount = BUILTIN_KEYS.length;
           const userCount = STATE.userKeyPool.length;
-          log('KEY', `Plug & Play: ✔ (Hệ thống sẵn có ${sysCount} Key VIP + ${userCount}/121 Key cá nhân)`);
-          for (let idx = 0; idx < Math.min(3, sysCount); idx++) {
-            const k = BUILTIN_KEYS[idx];
-            const p = detectKeyProvider(k);
-            log('KEY', `System Key #${idx + 1} [${p}] Ready: ✔`);
+          if (sysCount > 0) {
+            log('KEY', `Plug & Play: ✔ (Hệ thống sẵn có ${sysCount} Key VIP + ${userCount}/121 Key cá nhân)`);
+            for (let idx = 0; idx < Math.min(3, sysCount); idx++) {
+              const k = BUILTIN_KEYS[idx];
+              const p = detectKeyProvider(k);
+              log('KEY', `System Key #${idx + 1} [${p}] Ready: ✔`);
+            }
+          } else {
+            log('KEY', `API key nhúng: ⛔ Đã gỡ toàn bộ. Key cá nhân: ${userCount}/121. Engine chính: 🌉 Cross-Tab Gemini Bridge.`);
           }
         } catch (_) {}
       }, 2000);
