@@ -2214,6 +2214,48 @@
       return null;
     }
 
+    /* Phân loại câu trả lời của Gemini — để không bao giờ nộp nhầm một câu "xin lỗi"
+       thành đáp án. Ba kiểu hỏng đều đã gặp thật:
+       1) rate_limited: chạm hạn mức / bị chặn tạm thời.
+       2) image_missing: đề có ảnh nhưng Gemini bảo không thấy/không đọc được hình
+          (chip ảnh chưa kịp bám lúc upload) — đây chính là kiểu "giải đề cụt".
+       3) refusal: Gemini từ chối giải.
+       Chỉ kết luận hỏng khi câu trả lời KHÔNG có dòng "Trả lời:"/"ĐÁP ÁN:" và đủ ngắn,
+       vì một bài giải dài hoàn toàn có thể nhắc tới chữ "hình ảnh" mà vẫn đúng. */
+    const GEMINI_RATE_PATTERNS = [
+      /đã (?:đạt|dùng hết|sử dụng hết)[^.\n]{0,20}(?:giới hạn|hạn mức|hạn ngạch|lượt)/i,
+      /(?:hết|vượt)[^.\n]{0,12}(?:hạn mức|hạn ngạch|quota|lượt miễn phí)/i,
+      /quá (?:nhiều )?(?:yêu cầu|lượt hỏi|request)/i,
+      /you(?:'ve| have) (?:reached|hit)[^.\n]{0,30}(?:limit|quota)/i,
+      /(?:rate limit|quota exceeded|too many requests)/i,
+      /tôi (?:không thể|không) (?:tiếp tục|trả lời thêm|hỗ trợ thêm)[^.\n]{0,15}(?:nữa|lúc này)/i
+    ];
+    const GEMINI_NO_IMAGE_PATTERNS = [
+      /không (?:thể )?(?:thấy|xem|đọc|nhìn thấy|truy cập|mở)[^.\n]{0,30}(?:hình|ảnh|image|tệp|file|đính kèm)/i,
+      /(?:hình|ảnh|tệp)[^.\n]{0,20}(?:đính kèm|tải lên)?[^.\n]{0,15}(?:không|chưa) (?:hiển thị|tải lên|được gửi|kèm theo|tồn tại|nhận được)/i,
+      /không có (?:hình|ảnh|tệp|tài liệu) (?:nào )?(?:được )?(?:đính kèm|gửi kèm|tải lên)/i,
+      /(?:i )?(?:can(?:'|no)t|cannot|unable to)[^.\n]{0,30}(?:see|view|read|access)[^.\n]{0,25}(?:image|picture|attachment|file|screenshot)/i,
+      /no (?:image|attachment|file|screenshot)[^.\n]{0,20}(?:was |is )?(?:attached|provided|uploaded|visible)/i
+    ];
+    const GEMINI_REFUSAL_PATTERNS = [
+      /tôi (?:không thể|không được phép) (?:giúp|hỗ trợ|giải|trả lời)/i,
+      /(?:i )?(?:can(?:'|no)t|cannot|won't) (?:help|assist)(?: you)? with (?:this|that)/i
+    ];
+
+    function classifyGeminiReply(text, hasImages) {
+      const s = String(text || '').trim();
+      if (!s) return 'empty';
+      /* Có dòng đáp án rõ ràng thì luôn coi là hợp lệ, kể cả câu dài. */
+      if (/(?:^|\n)\s*(?:Trả\s*lời|ĐÁP\s*ÁN|Đáp\s*án)\s*[:：]/i.test(s)) return 'ok';
+      /* Bài dài không có marker: coi là đáp án bình thường, không đoán bừa. */
+      if (s.length > 600) return 'ok';
+      const head = s.slice(0, 600);
+      if (GEMINI_RATE_PATTERNS.some((re) => re.test(head))) return 'rate_limited';
+      if (hasImages && GEMINI_NO_IMAGE_PATTERNS.some((re) => re.test(head))) return 'image_missing';
+      if (GEMINI_REFUSAL_PATTERNS.some((re) => re.test(head))) return 'refusal';
+      return 'ok';
+    }
+
     async function handleIncomingRequest(req) {
       if (req && req.cancel) {
         console.log('[EduNext Bridge] Nhận tín hiệu hủy từ EduNext');
@@ -2508,7 +2550,7 @@
         setBadge('🌉 Đang chờ Gemini sinh đáp án...', '#818cf8');
         updateGeminiTabTitle('[🧠 Đang giải...]');
         notifyAll(id => reportStatus(id, 'WAITING', 'Đang chờ mô hình Gemini phân tích và giải đề...'));
-        const response = await waitForResponse(baselineCount, baselineText, reqId, 150000);
+        let response = await waitForResponse(baselineCount, baselineText, reqId, 150000);
 
         if (!response || response.length <= 3) {
           /* Gemini không sinh ra nội dung (hết quota, mất mạng, bị chặn). Báo lỗi rõ
@@ -2524,6 +2566,80 @@
             setBadge('🌉 EduNext Bridge: Sẵn sàng', '#10b981');
             updateGeminiTabTitle('[🟢 Sẵn sàng]');
           }, 4000);
+          return;
+        }
+
+        /* Chốt chặn chất lượng: câu trả lời có thể là "tôi không thấy hình đính kèm"
+           hoặc "bạn đã đạt giới hạn" — trước đây cả hai đều bị coi là đáp án rồi đem
+           nộp, tức là nộp sai trong im lặng. Nay phân loại trước khi dùng. */
+        let replyKind = classifyGeminiReply(response, inboundImages.length > 0);
+
+        if (replyKind === 'image_missing' && inboundImages.length > 0) {
+          /* Ảnh rơi lúc upload (chip chưa bám) → đính lại rồi gửi lại ĐÚNG MỘT lượt.
+             Circuit breaker: không thử vòng lặp, tránh spam tab Gemini. */
+          console.warn('[EduNext Bridge] ⚠️ Gemini báo không thấy hình đính kèm — đính lại ảnh và gửi lại 1 lượt.');
+          setBadge('🌉 Gemini chưa thấy ảnh đề, đang đính lại...', '#f59e0b');
+          notifyAll(id => reportStatus(id, 'UPLOADING_IMAGE', 'Gemini chưa thấy ảnh đề, đang đính lại và gửi lại...'));
+          try {
+            await sleepB(800);
+            const chips2 = countPendingAttachments();
+            for (let i = 0; i < inboundImages.length; i++) {
+              try { await attachImageToGemini(inboundImages[i], i); } catch (_) {}
+              await sleepB(700);
+            }
+            await waitForAttachment(chips2, 6000);
+            const turns2 = getModelResponseElements();
+            const base2 = turns2.length;
+            const baseText2 = base2 > 0 ? extractCleanResponseText(turns2[base2 - 1]) : '';
+            const input2 = await findInput();
+            const injected2 = input2 ? await doInject(input2, req.prompt) : false;
+            if (injected2) {
+              await sleepB(500);
+              await clickSend(input2);
+              await confirmSent(12000);
+              const retryResp = await waitForResponse(base2, baseText2, reqId, 150000);
+              const retryKind = classifyGeminiReply(retryResp, true);
+              console.log(`[EduNext Bridge] Lượt gửi lại: ${retryKind}`);
+              if (retryResp && retryKind === 'ok') {
+                response = retryResp;
+                replyKind = 'ok';
+              }
+            }
+          } catch (e) {
+            console.warn('[EduNext Bridge] Gửi lại kèm ảnh thất bại:', e && e.message);
+          }
+        }
+
+        if (replyKind === 'rate_limited') {
+          console.warn('[EduNext Bridge] ⛔ Gemini báo hết hạn mức/chặn tạm thời:', (response || '').slice(0, 120));
+          setBadge('🌉 Lỗi: Gemini hết hạn mức', '#ef4444');
+          updateGeminiTabTitle('[⛔ Hết hạn mức]');
+          notifyAll(id => {
+            reportStatus(id, 'ERROR', 'Gemini báo hết hạn mức / bị chặn tạm thời — không nộp đáp án rỗng');
+            sendResponse(id, null, 'GEMINI_RATE_LIMITED: ' + (response || '').slice(0, 160), pHash);
+          });
+          WorkerTimer.setTimeout(() => {
+            setBadge('🌉 EduNext Bridge: Sẵn sàng', '#10b981');
+            updateGeminiTabTitle('[🟢 Sẵn sàng]');
+          }, 5000);
+          return;
+        }
+
+        if (replyKind === 'refusal' || replyKind === 'image_missing') {
+          const why = replyKind === 'image_missing'
+            ? 'Gemini vẫn không đọc được ảnh đề sau khi đính lại (không nộp đáp án đoán)'
+            : 'Gemini từ chối giải câu này';
+          console.warn('[EduNext Bridge] ⛔ ' + why + ':', (response || '').slice(0, 120));
+          setBadge('🌉 Lỗi: Gemini không giải được đề này', '#ef4444');
+          updateGeminiTabTitle('[❌ Không giải được]');
+          notifyAll(id => {
+            reportStatus(id, 'ERROR', why);
+            sendResponse(id, null, (replyKind === 'image_missing' ? 'GEMINI_IMAGE_NOT_SEEN: ' : 'GEMINI_REFUSED: ') + (response || '').slice(0, 160), pHash);
+          });
+          WorkerTimer.setTimeout(() => {
+            setBadge('🌉 EduNext Bridge: Sẵn sàng', '#10b981');
+            updateGeminiTabTitle('[🟢 Sẵn sàng]');
+          }, 5000);
           return;
         }
 
@@ -7075,6 +7191,15 @@ LỊCH SỬ CÁC CÂU HỎI VỪA HOÀN THÀNH TRONG BÀI HỌC (tham khảo ti�
       if (t.length < 3) return true;
       if (/^\s*(?:trả\s*lời|đáp\s*án|answer)\s*[:\-]?\s*$/i.test(t)) return true;
       if (/là\s*một\s*mô\s*hình\s*ngôn\s*ngữ|không\s*được\s*thiết\s*kế\s*để\s*trợ\s*giúp|không\s*thể\s*hỗ\s*trợ\s*(?:nội\s*dung|yêu\s*cầu|việc)|as\s*a\s*language\s*model|i\s*cannot\s*assist|cannot\s*help\s*with\s*that|chính\s*sách\s*an\s*toàn|không\s*thể\s*trả\s*lời\s*(?:câu\s*hỏi|yêu\s*cầu)\s*này|vi\s*phạm\s*(?:chính\s*sách|nguyên\s*tắc)/i.test(t)) return true;
+      /* Đề có ảnh nhưng AI bảo không thấy hình — câu này KHÔNG phải đáp án.
+         Nếu để lọt, script nộp nguyên câu "tôi không thấy ảnh" và bị chấm sai. */
+      if (/không\s*(?:thể\s*)?(?:thấy|xem|đọc|nhìn\s*thấy|truy\s*cập|mở)[^.\n]{0,30}(?:hình|ảnh|image|tệp|file|đính\s*kèm)/i.test(t)) return true;
+      if (/(?:hình|ảnh|tệp|attachment)[^.\n]{0,20}(?:đính\s*kèm|tải\s*lên)?[^.\n]{0,15}(?:không|chưa)\s*(?:hiển\s*thị|tải\s*lên|được\s*gửi|kèm\s*theo|tồn\s*tại|nhận\s*được)/i.test(t)) return true;
+      if (/(?:can(?:'|no)t|cannot|unable\s*to)\s*(?:see|view|read|access)[^.\n]{0,25}(?:image|picture|attachment|file|screenshot)/i.test(t)) return true;
+      /* AI báo hết hạn mức / bị chặn — cũng không phải đáp án. */
+      if (/đã\s*(?:đạt|dùng\s*hết|sử\s*dụng\s*hết)[^.\n]{0,20}(?:giới\s*hạn|hạn\s*mức|hạn\s*ngạch|lượt)/i.test(t)) return true;
+      if (/(?:hết|vượt)\s*(?:hạn\s*mức|hạn\s*ngạch|quota)|quá\s*nhiều\s*(?:yêu\s*cầu|lượt\s*hỏi)/i.test(t)) return true;
+      if (/(?:rate\s*limit|quota\s*exceeded|too\s*many\s*requests)/i.test(t)) return true;
       return false;
     },
 
@@ -8063,14 +8188,38 @@ XÁC NHẬN: Bạn đã hiểu rõ toàn bộ vai trò và quy tắc THPT trên 
       let s = String(raw || '').trim();
       if (!s) return s;
       s = s.replace(/```[a-zA-Z]*\s*/g, '').trim();
+      /* Bỏ trang trí markdown và câu dẫn ("**Đáp án đúng là**", "Vậy đáp án là", "- ...").
+         Gemini rất hay thêm mấy thứ này; ô trả lời của EduNext chỉ chấm đúng khi
+         chuỗi sát với đáp án thật. */
+      const tidy = (t) => String(t || '')
+        .replace(/\*\*|__|`/g, '')
+        .replace(/^\s*[-*•+]\s+/, '')
+        .replace(/^\s*#{1,6}\s*/, '')
+        .replace(/^\s*(?:vậy\s*)?(?:đáp\s*án|câu\s*trả\s*lời|kết\s*quả)(?:\s*đúng)?(?:\s*là|\s*[:：])\s*/i, '')
+        .replace(/\s+/g, ' ')
+        .trim();
       const isEssay = qd && (qd.questionType === 'ESSAY' || /TỰ\s*LUẬN/i.test(qd.questionType || ''));
       if (isEssay) return /^\s*Trả\s*lời\s*:/i.test(s) ? s : ('Trả lời: ' + s);
-      if (/^\s*Trả\s*lời\s*:/i.test(s)) return s;
+      /* Chỉ nhận "Trả lời:" phủ trọn chuỗi khi phần sau nằm gọn trên MỘT dòng;
+         nhiều dòng thì phải để nhánh theo-dòng cắt lấy đúng dòng đáp án. */
+      const direct = /^\s*Trả\s*lời\s*:\s*([^\n]+)\s*$/i.exec(s);
+      if (direct) return 'Trả lời: ' + tidy(direct[1]);
       const line = /(?:^|\n)\s*(Trả\s*lời\s*:[^\n]+)/i.exec(s);
-      if (line) return line[1].trim();
+      if (line) return 'Trả lời: ' + tidy(line[1].replace(/^\s*Trả\s*lời\s*:/i, ''));
       const ans = /(?:^|\n)\s*(?:ĐÁP\s*ÁN|Đáp\s*án)\s*[:：]\s*([^\n]+)/i.exec(s);
-      if (ans) return 'Trả lời: ' + ans[1].trim();
-      return s;
+      if (ans) return 'Trả lời: ' + tidy(ans[1]);
+      /* Không có marker: đa số mô hình vẫn kết bài bằng đúng đáp án ở dòng cuối
+         (hoặc dòng kiểu "B. 25"). Lấy dòng đó thay vì nộp cả đoạn văn. */
+      const lines = s.split('\n').map(tidy).filter(Boolean);
+      if (lines.length > 1) {
+        const optLine = [...lines].reverse().find(l => /^[A-D]\s*[.)\-:]/.test(l) && l.length <= 120);
+        const lastLine = lines[lines.length - 1].length <= 120 ? lines[lines.length - 1] : null;
+        const pick = optLine || lastLine;
+        if (pick) return 'Trả lời: ' + pick;
+        return s;
+      }
+      const one = tidy(s);
+      return one ? ('Trả lời: ' + one) : s;
     },
 
     async getDuckChatVQD() {
