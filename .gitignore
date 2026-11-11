@@ -1,0 +1,10 @@
+# Studio internal loop & engineering files
+.run/
+loop-*.md
+LOOP.md
+STATE.md
+AGENTS.md
+gate.yaml
+docs/
+tests/
+tools/

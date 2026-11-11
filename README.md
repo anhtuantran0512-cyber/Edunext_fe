@@ -7,8 +7,8 @@ Tổ hợp Userscript tự động hoá và hỗ trợ học tập chuyên nghi�
 | Tệp | Bản | Mục đích | Tính năng chính |
 |---|---|---|---|
 | `EDUNEXT_BAS.user.js` | **BAS v1.0.1** | Userscript Gia sư tự động (Bản mã hoá bảo vệ) | Phím tắt **Ctrl+E** ẩn/hiện GUI chạy ngầm, đa mô hình API + Cầu Gemini, chống rò rỉ đề, bảo mật nhiều tầng chống AI deobfuscate |
-| `edunext_ULTRA.user.js` | **ULTRA v3.5.0** | Userscript Cầu nối Cross-Tab Gemini | Cầu nối trực tiếp sang tab Gemini thật, React Fiber Ground Truth, Canvas Active Lock |
-| `edunext_ULTRA_console.js` | **ULTRA v3.5.0** | Dán trực tiếp DevTools Console | Bản console chạy trực tiếp không cần tiện ích |
+| `edunext_ULTRA.user.js` | **ULTRA v3.9.0** | Userscript Cầu nối Cross-Tab Gemini | Cầu nối trực tiếp sang tab Gemini thật, React Fiber Ground Truth, Canvas Active Lock |
+| `edunext_ULTRA_console.js` | **ULTRA v3.9.0** | Dán trực tiếp DevTools Console | Bản console chạy trực tiếp không cần tiện ích |
 
 ---
 
