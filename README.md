@@ -1,27 +1,29 @@
-# Edunext_fe
+# Edunext_fe — BroAmStuck Studio
 
-Userscript tự động hoá việc làm bài tập trên EduNext (FPT), dùng **Cross-Tab Bridge** sang tab `gemini.google.com` đang mở để lấy đáp án. Không có API key, không có server trung gian, không có kho đáp án dùng chung.
+Tổ hợp Userscript tự động hoá và hỗ trợ học tập chuyên nghiệp trên EduNext (FPT), phát triển bởi **BroAmStuck Studio**.
 
-Repo chỉ chứa đúng hai tệp:
+## 📦 Danh mục kịch bản phát hành
 
-| Tệp | Dùng cho | Kích thước |
-|---|---|---|
-| `edunext_ULTRA.user.js` | Cài qua Tampermonkey / Violentmonkey | ~749 KB |
-| `edunext_ULTRA_console.js` | Dán vào DevTools Console | ~747 KB |
+| Tệp | Bản | Mục đích | Tính năng chính |
+|---|---|---|---|
+| `EDUNEXT_BAS.user.js` | **BAS v1.0.1** | Userscript Gia sư tự động (Bản mã hoá bảo vệ) | Phím tắt **Ctrl+E** ẩn/hiện GUI chạy ngầm, đa mô hình API + Cầu Gemini, chống rò rỉ đề, bảo mật nhiều tầng chống AI deobfuscate |
+| `edunext_ULTRA.user.js` | **ULTRA v3.5.0** | Userscript Cầu nối Cross-Tab Gemini | Cầu nối trực tiếp sang tab Gemini thật, React Fiber Ground Truth, Canvas Active Lock |
+| `edunext_ULTRA_console.js` | **ULTRA v3.5.0** | Dán trực tiếp DevTools Console | Bản console chạy trực tiếp không cần tiện ích |
 
-Mọi tệp di sản (script Python điều khiển Camofox, báo cáo audit, ảnh bằng chứng, ghi chú vận hành) **không** nằm ở đây mà ở project Studio tương ứng:
+---
 
-```
-~/Documents/BroAmStuck Studio/projects/edunext/legacy_scripts/
-├── automation/   # 28 script Python + solve_exam.js
-├── reports/      # audit JSON + log vòng lặp
-├── screenshots/  # 84 ảnh bằng chứng
-└── docs/         # edunext.md, EDUNEXT_LOOP_STATE.md, đề Azota
-```
+## ⚡ Hướng dẫn sử dụng EDUNEXT BAS (Phím tắt Ctrl + E)
 
-Hai tệp là **cùng một mã nguồn**: bản console là bản userscript bỏ 34 dòng header `==UserScript==`. Nếu sửa một bản, bản kia phải build lại — đừng sửa tay cả hai.
-
-Phiên bản hiện tại: **3.3.6** — React Fiber Ground Truth, Canvas #2 Active Lock & Anti-Freeze FSM Unlocking (xem mục 13).
+`EDUNEXT_BAS.user.js` là phiên bản độc lập hoàn toàn mới của BroAmStuck Studio:
+1. **Cài đặt:** Mở tệp `EDUNEXT_BAS.user.js` trên GitHub → chọn *Raw* → Tampermonkey sẽ tự nhận diện và hiển thị hộp thoại Cài đặt (Install).
+2. **Kích hoạt:** Truy cập trang web `https://fsc-edunext.fpt.edu.vn/*` hoặc `https://edunext.fpt.edu.vn/*`.
+3. **Phím tắt ẩn/hiện GUI (Ctrl + E):**
+   - **Nhấn `Ctrl + E`:** Ngay lập tức ẩn toàn bộ giao diện (bảng điều khiển + nút ghim nổi) vào chế độ chạy ngầm tuyệt đối (Stealth Mode), không gây chú ý trên màn hình.
+   - **Nhấn lại `Ctrl + E`:** Mở lại bảng điều khiển "Sổ bài" để tùy chỉnh cấu hình, xem lịch sử và kiểm tra tiến độ giải.
+   - **Nhấn `Ctrl + Shift + X`:** Dừng khẩn cấp mọi tiến trình tự động.
+4. **Bản quyền & Bảo mật:**
+   - Mã nguồn được bảo vệ bằng hệ thống mã hoá đa tầng và màng bẫy phản AI (Anti-AI Prompt Traps).
+   - Mỗi 250 dòng mã đều được đóng dấu bản quyền độc quyền của BroAmStuck Studio.
 
 ---
 
@@ -47,7 +49,7 @@ Hai tab không nói chuyện trực tiếp với nhau. Gói tin được phát t
 | `EDUNEXT_BRIDGE_HEARTBEAT` | Nhịp tim của tab Gemini, ghi mỗi **1200 ms** |
 | `EDUNEXT_BRIDGE_PING` / `EDUNEXT_BRIDGE_PONG` | Bắt tay để biết tab Gemini còn sống |
 | `EDUNEXT_BRIDGE_STATUS` / `EDUNEXT_BRIDGE_CLOSED` | Trạng thái và mốc thời gian tab Gemini bị đóng |
-| `EDUNEXT_GEMINI_MODEL` | Model ép chọn bên Gemini (mặc định `3.1 Pro`) |
+| `EDUNEXT_GEMINI_MODEL` | **Không còn dùng** (v3.4.0). Model do bạn tự chọn trên Gemini, script chỉ đọc tên để hiển thị |
 | `EDUNEXT_AI_MODE` | Tuyến AI (luôn `bridge` ở bản này) |
 
 Hệ quả trực tiếp của thiết kế này:
@@ -205,7 +207,18 @@ grep -nE "sk-[A-Za-z0-9]{8}|AIza[A-Za-z0-9_-]{20}|ghp_[A-Za-z0-9]{20}"
 grep -n "BUILTIN_KEYS" edunext_ULTRA.user.js          # phải là Object.freeze([])
 grep -n "indexedDB" edunext_ULTRA.user.js             # đúng 1 dòng: kho telemetry cục bộ
 grep -nE "fetch\\(|GM_xmlhttpRequest\\(" edunext_ULTRA.user.js | head -20   # đối chiếu danh sách host
+
+# Bộ test hồi quy cho Handshake FSM + Canvas Ledger + chữ ký 🚀 (35 assert)
+node tests/handshake.test.mjs
+
+# Hồi quy: đứng im / câu #2 / đáp án cũ / model / gửi ảnh / vị trí đáp án (62 assert)
+node tests/stability.test.mjs
+
+# Luồng chat thật + sổ lượt mạng + nguồn ảnh API canvas (41 assert)
+node tests/netfeed.test.mjs
 ```
+
+`tests/handshake.test.mjs` trích **nguyên văn** khối phương thức handshake từ `edunext_ULTRA.user.js` rồi chạy trên một chat EduNext giả lập: chào → thẻ "Sẵn sàng" (🚀 đỏ) → đề 1 → đề 2 → đề 3, cộng các ca chống nhận nhầm (chữ đỏ dẹt, gạch chân, đồ thị đỏ), chống gửi lặp "Bắt đầu", chống kẹt và race khi fiber chưa kịp render. Nếu sửa logic handshake mà test đỏ, đừng phát hành.
 
 Muốn xem script thật sự gửi gì: mở DevTools → Network ở **cả hai tab** (EduNext và Gemini), tự làm một câu và quan sát; đồng thời mở Application → Extension Storage để xem nội dung `EDUNEXT_AI_REQUEST` / `EDUNEXT_AI_RESPONSE`. Không có endpoint nào thuộc tác giả; các host còn sót thuộc tuyến đã vô hiệu được liệt kê ở mục 9.
 
@@ -221,6 +234,154 @@ Muốn xem script thật sự gửi gì: mở DevTools → Network ở **cả ha
 Bản hiện tại đã dọn về hai tệp. Các bản trước — `edunext_STUDIO_DIRECT`, `edunext_free`, `edunext_freetrial`, `edunext_console_dán` — và toàn bộ tính năng "kho đáp án tự học" / "kho chung dùng chung trên GitHub" đã bị **xoá khỏi repo**. README cũ mô tả những tính năng đó cùng cơ chế "bể 15 API key dùng chung"; cả hai đều **không còn tồn tại**. Nếu bạn đọc được hướng dẫn nhắc tới chúng ở đâu khác, hướng dẫn đó đã lỗi thời.
 
 Mã thuộc BroAmStuck Studio. Script có kiểm tra toàn vẹn và sẽ khoá giao diện nếu các trường bản quyền bị sửa.
+
+**3.9.0** — **Vòng lặp tự giám sát bằng 3 nguồn độc lập + ảnh đề lấy từ API canvas gắn đúng lượt:**
+- **Lỗi 1 — "câu sau ra rồi mà vẫn đứng im":** `superviseCycle()` (lưới giám sát 4 giây) gọi `findActiveQuestion()` rồi **`return` ngay nếu nó trả `null`**. Mà `null` chính là ca fiber đóng băng — tức là **lưới an toàn mù đúng lúc cần nó nhất**, và nó dùng chung nguồn với đường phát hiện nên không thể là phương án dự phòng.
+  1. Nguồn 2: khối canvas **cuối cùng theo thứ tự DOM** (`findQuestionByPosition`) — không cần fiber.
+  2. Nguồn 3: **luồng mạng** `__TURN_END__` + `source_message_id` (`isFreshNetworkTurn`) — không cần cả DOM.
+  3. Chỉ khi cả ba đều không thấy đề thì mới bỏ lượt giám sát đó. Log rõ nguồn nào đã cứu: `🛟 Giám sát: ...`.
+- **Lỗi 2 — ảnh đề lấy sai lượt / mất ảnh khi mạng chậm:** ảnh trước đây được đoán theo *thời điểm* từ bộ đệm interceptor, nên khi canvas API về trước lúc React vẽ khối (hoặc về sau) thì hoặc mất ảnh, hoặc vớ ảnh câu trước.
+  1. `GET /api-v1/chat/tasks/{id}/canvas` nay là **nguồn ảnh chính thức**, được ghi kèm **`turnId`** của lượt đang mở.
+  2. `getFeedCanvasUrls()` **từ chối** ảnh mang `turnId` của lượt vừa nộp → không bao giờ đính ảnh câu trước sang câu mới.
+  3. Bước bóc ảnh dùng nguồn này **trước** bộ đệm đoán-theo-thời-điểm, và cả nhánh `fetch` lẫn `XMLHttpRequest` đều ghi nhận (trước đây chỉ nhánh fetch).
+  4. Lượt bot **chỉ có ảnh, không có chữ** vẫn được ghi vào sổ lượt (đánh dấu `imageOnly`) để phép so `lastAnsweredTurnId` không lệch pha; `getNetworkTurn()` vẫn không trả lượt rỗng chữ nên **không giải bừa**.
+  5. `__EDUNEXT_NET_FEED_STATS__` được cập nhật cả khi chỉ có ảnh canvas về (trước đây chỉ cập nhật lúc kết thúc lượt → nhìn tưởng hook hỏng).
+- **Kiểm chứng:** `node --check` cả hai bản; `BUILD_MATCH`; **36 + 35 + 41 + 8 + 62 = 182/182 PASS**. Test mới chạy **hành vi thật** của `finalizeNetTurn` trên ba ca: lượt rỗng không ảnh → không tạo; lượt rỗng **có ảnh của đúng lượt** → tạo và đánh dấu `imageOnly`; ảnh của lượt cũ → không biến lượt rỗng thành đề.
+- **Giới hạn đã biết:** phần kiểm chứng là hành vi trên DOM giả + đọc mã nguồn, **chưa phải** một lượt end-to-end trên đề thật có tài khoản. Khi chạy thật, ba log cần thấy: `🛰 Lượt bot #N đã kết thúc qua luồng mạng`, `🧩 Ảnh đề lấy từ API canvas (đúng lượt)`, `Sau khi đính: 1 chip ảnh (cần 1)`.
+
+**3.7.0** — **Danh tính KHỐI DOM: hết đứng im ở câu #2, và đính ảnh idempotent:**
+- **Lỗi 1 — "câu #2 ra rồi mà script đứng im / phải bấm Giải lại":** đường phát hiện `findActiveQuestion()` đi qua `getCurrentTurnAssistantMessages()`/React Fiber. Khi fiber đóng băng hoặc trả **lượt cũ**, chuỗi đó trả `null` (hoặc đề cũ) → script chỉ log `👁 Chưa thấy đề...` và đứng yên, dù khối đề mới đã nằm trên màn hình.
+  1. **Ghim khối DOM đã nộp:** lúc nộp đáp án, script ghi `STATE.lastAnsweredBlockEl = newestCanvasBlock()`. Mỗi lượt bot là một `[data-testid="chat-canvas-container"]` riêng — **khối khác = lượt mới**, đây là bằng chứng không thể sai do fiber.
+  2. `unlockStaleAnsweredMarker()` nay mở khoá khi khối mới nhất **không phải** khối đã nộp và nội dung đã khác — kể cả khi đề mới **cùng dạng** với đề cũ (trước đây khớp mờ chặn nhầm → kẹt vĩnh viễn).
+  3. **Nguồn dự phòng theo vị trí:** `findQuestionByPosition()` đọc thẳng khối canvas cuối, tách lời phê khỏi đề. `checkForNewContent()` dùng nó khi `findActiveQuestion()` trả rỗng (log `🧭 Nguồn fiber chưa cập nhật...`).
+  4. Vẫn giữ nguyên tắc chống nộp lặp: **cùng khối + cùng nội dung → không mở khoá**; không ghi được khối cũ thì rơi về luật cũ.
+- **Lỗi 2 — "gửi ảnh + câu hỏi rồi mà vẫn đính thêm 1 ảnh":** `attachImageToGemini()` trả `false` khi chip preview của Gemini xuất hiện **chậm hơn 1,5s**; caller cũ thử lại → **2 chip cho cùng một ảnh**. Nay có `ensureAttachments(images, need)`:
+  1. Sau **mỗi** lần thử đều đọc lại số chip — chip đã tăng thì coi là thành công và **không thử lại**.
+  2. Kết thúc luôn ở **đúng** số ảnh của đề; nếu **thừa** chip thì dọn sạch rồi đính lại đúng số lượng.
+  3. Cả ba nhánh (đính ban đầu · đính bù trước khi gửi · gửi lại khi thiếu ảnh) đều dùng chung helper này — không còn vòng thử lại mù.
+- **Kiểm chứng:** `node --check` cả hai bản; `BUILD_MATCH`; **36 + 35 + 8 + 59 = 138/138 PASS**. Test mới [11] chạy **hành vi thật** của `unlockStaleAnsweredMarker` trên ba ca: khối mới → mở khoá; cùng khối → không mở; thiếu khối cũ → giữ luật chống lặp. Tampermonkey đã cập nhật `3.6.0 → 3.7.0`.
+
+**3.6.0** — **Sổ sự thật lúc gửi: không còn báo lỗi sai khi Gemini ĐÃ nhận đề:**
+- **Hiện tượng thật đo được trên trang live:** Gemini đã nhận đề + **1 ảnh**, đã trả lời, nhưng badge hiện `🌉 Lỗi: Gemini không nhận được câu hỏi` và script **vứt bỏ đáp án**; các lần trước đó cùng nguyên nhân dẫn tới **gửi lại → nhân đôi câu hỏi**. Trích DOM thật: `user-query` khớp 2 phần tử nhưng chỉ là **1 lượt** (cha + `.query-text` con).
+- **Nguyên nhân:** xác nhận gửi chỉ dựa vào hai bộ đếm `getModelResponseElements()` và `countUserTurns()`. Khi Gemini ảo hoá/dựng lại khung chat, cả hai trả **số cũ** → âm tính giả → script kết luận "chưa gửi".
+- **Sửa tầng gốc:**
+  1. `collectUserTurnEls()` — gom lượt người dùng, **khử phần tử lồng nhau** (1 tin = 1 lượt) và bỏ phần tử nằm trong badge; `countUserTurns()` dùng chung nguồn này.
+  2. **Bằng chứng chữ:** `sendEvidence()` đọc chữ của lượt người dùng **cuối** và so với `promptHead` (40 ký tự đầu đề). Nếu khớp → tin đã đi, **bất kể bộ đếm**.
+  3. `confirmSent()` xác nhận khi có **một trong bốn** bằng chứng: khớp chữ đề · số lượt người dùng tăng · số lượt bot tăng · ô soạn thảo **đã trống** (trước đó có chữ).
+  4. **Chống gửi trùng:** trước khi gửi lại lượt 2, script kiểm tra lại bằng chứng chữ; nếu đề đã nằm trong một lượt người dùng thì **không gửi lại** (log `🔁 Tin đã thực sự đi ... không gửi lại để tránh nhân đôi`).
+- **Kiểm chứng:** DOM thật của tab Gemini đang lỗi cho `matched: true` với logic mới; `tests/sendtruth.test.mjs` (8 assert, chạy trên DOM giả có **bộ đếm đứng yên** — đúng điều kiện gây lỗi) xanh. Tổng: 36 + 35 + 49 + **8** = **128/128 PASS**.
+
+**3.5.1** — **Hết kẹt sau mỗi câu & không còn gửi dư/sót ảnh:**
+- **Lỗi 1 — "xong câu 1 rồi đơ, phải bấm Giải lại":** cổng chống nộp lặp (`resolveAnsweredState`) quyết định "câu này đã trả lời rồi" dựa trên `getCurrentTurnAssistantMessages()`/React Fiber. Khi React **tái dùng node** hoặc fiber cập nhật chậm, nguồn đó vẫn trả về **lượt cũ** → vân tay trùng câu vừa nộp → `isAlreadyAnswered = true` → `return` **mãi mãi**, dù DOM đã có đề mới. Bấm "Giải lại" xoá ký ức nên lại chạy (giải thích đúng hiện tượng bạn gặp).
+  1. **Lưới an toàn 12s trước đây chỉ xoá `lastFeedbackFingerprint` + dataset, KHÔNG xoá `lastAnsweredQuestionText`/`lastAnsweredKey`** → vẫn im lặng. Nay xoá **cả** ký ức đó.
+  2. Thêm nguồn **độc lập theo vị trí DOM**: `readNewestQuestionByPosition()` đọc phần tử mới nhất (khối canvas mới nhất → lượt bot cuối), tách lời phê khỏi đề.
+  3. `unlockStaleAnsweredMarker()` chỉ mở khoá khi có **bằng chứng khác biệt**: vân tay khác câu đã nộp **và** (không khớp mờ **hoặc** phần đề được tách ra khỏi lời phê, tức nội dung mới nằm sau nhận xét). Không mở khoá mò.
+  4. Cổng `if (isAlreadyAnswered)` dùng nó trước khi `return` → **vị trí DOM thắng vân tay cũ**. Log: `🔓 Mở khoá "đã trả lời": lượt bot mới nhất là đề KHÁC (nguồn newest_block)`.
+- **Lỗi 2 — "gửi ảnh và câu hỏi rồi mà vẫn đính thêm 1 ảnh, không gửi hỏi":** ba nguồn gây ảnh dư.
+  1. **Gửi ảnh trần:** nhánh "tin nhắn thiếu ảnh" trước đây chỉ **đính lại ảnh rồi `clickSend`**, không nhập lại đề → sinh một lượt **ảnh không có câu hỏi** và chip còn sót trong khung soạn thảo. Nay **bắt buộc `doInject()` đề trước khi gửi**; nhập không được thì throw và **dọn chip**.
+  2. **Kết luận "thiếu ảnh" quá sớm:** Gemini render **chữ trước, thumbnail sau** (200–1500ms). Đọc một lần rồi kết luận → đính thêm ảnh trong khi ảnh thật đã đi. Nay `waitForUserTurnImage(4000)` chờ tối đa 4s.
+  3. **Đính lại toàn bộ thay vì đính bù:** cả ba nhánh đính ảnh nay chỉ đính **đúng số còn thiếu** (`for (let i = chipsNow; ...)`), và đọc số chip **hai lần** cách 400ms (chip chớp tắt khi React vẽ lại).
+  4. **Dọn chip sót:** đầu mỗi yêu cầu mới, chip ảnh của câu trước bị xoá (`clearPendingAttachments`) trước khi đính ảnh đề mới; sau khi xác nhận gửi, chip còn lại cũng bị dọn → **không bao giờ dính sang câu sau**.
+- **Lỗi 3 — PAUSED là trạng thái chết:** trước đây chỉ bấm "Giải lại" tay mới thoát. Nay tự hồi về IDLE sau 10s, **tối đa 3 lượt cho mỗi câu** (circuit breaker), sau đó dừng hẳn và báo rõ — không quay vòng vô hạn khi lỗi thật (hết quota, mất mạng).
+- **Test:** 35 + **49** + 33 = **117/117 PASS** (thêm 13 assert cho đúng ba lỗi trên: chờ ảnh render, dọn chip trước/sau khi gửi, nhập lại đề trước khi gửi lại, nguồn DOM độc lập, mở khoá có bằng chứng, lưới an toàn xoá cả ký ức, tự hồi PAUSED có giới hạn).
+
+**3.5.0** — **Neo ảnh vào khối chat MỚI NHẤT + sổ chu kỳ câu hỏi + giám sát 4 giây:**
+- **Neo ảnh (đúng yêu cầu vận hành):** có 5 khối chat assistant thì lấy ảnh từ **khối thứ 5**; khối mới xuất hiện thì dùng **khối mới**.
+  1. `chatTurnElements()` đếm lượt chat theo **thứ tự tài liệu** và làm phẳng phần tử lồng nhau (mỗi lượt đếm đúng 1 lần).
+  2. `newestCanvasBlock()` duyệt **ngược** danh sách lượt, trả về khối **mới nhất** có canvas/bài tập đủ lớn. Không phụ thuộc việc đoán vai trò tin nhắn — nên không thể lấy nhầm ảnh của lượt cũ.
+  3. `extractQuestionData()` **neo** vào khối đó và bóc ảnh trực tiếp trong khối (canvas → dataURL) **trước** mọi nguồn khác.
+  4. Bộ đệm network bị chặn bằng mốc thời gian của khối: ảnh hái **trước** khi khối mới nhất xuất hiện là ảnh của câu trước → **bỏ**. Log: `🧭 Neo ảnh: dùng khối mới nhất #5/5`.
+- **Sổ chu kỳ câu hỏi (`STATE.cycle`):** mỗi câu có một vân tay riêng, đi qua `detected → extracting → sent → answered`. Đáp án Gemini **ghim theo chu kỳ tại thời điểm gửi** (`cycleKeyAtSend`): nếu trong lúc chờ Gemini mà giao diện ra câu mới (chu kỳ đổi) thì đáp án đang chờ là của câu cũ → **bỏ**, không nộp nhầm.
+- **Giám sát 4 giây (`superviseCycle`):** vòng heartbeat tự kiểm mỗi 4 giây: (a) đề hiện tại khác chu kỳ đang giữ và máy đang rảnh → **ép đọc đề mới ngay**; (b) đã phát hiện nhưng >4s chưa gửi sang Gemini → **ép chạy** (bỏ qua cổng "bot đang soạn" bằng cờ `force`); (c) chu kỳ treo >90s → **đọc lại từ đầu**. Đây là lớp bảo đảm "không đứng im" theo đúng nhịp bạn yêu cầu.
+- **Test:** 35 + 37 + 33 = **105/105 PASS**. 33 assert mới gồm 6 bài **kiểm thử hành vi** trên DOM giả (5 khối → lấy khối 5; thêm khối 6 → lấy khối 6; lượt chữ mới không có canvas → vẫn neo khối canvas gần nhất; mốc thời gian không trôi; cùng câu → không tạo chu kỳ mới; câu mới → tạo chu kỳ mới).
+
+**3.4.2** — **Hết đứng im sau câu #1 & Gemini không trả đáp án của câu trước:**
+- **Chuỗi lỗi thật (giải thích đúng hiện tượng bạn gặp):** câu #1 xong → câu #2 hiện → script gửi sang Gemini → Gemini **trả về đáp án của câu #1** (còn đang stream dở lúc chụp baseline) → EduNext nộp sai → nhận INCORRECT → sửa bài → lại nhận đúng đáp án cũ đó → lặp tới `MAX_RETRIES` → **PAUSED = đứng im, không đọc gì nữa**. Bấm "Giải lại" tạo chu trình mới nên thỉnh thoảng lại chạy.
+- **Sửa 1 — Gemini chỉ được nhận đáp án nằm SAU tin nhắn vừa gửi:**
+  1. Bản cũ chỉ so `text !== baselineText`. Nếu lúc chụp baseline đáp án trước **còn đang viết dở** thì baselineText là text dở; khi nó viết xong, text khác baseline → bị nhận như đáp án của câu mới.
+  2. Nay có `comesAfterLastUserTurn()` dùng `Node.DOCUMENT_POSITION_FOLLOWING` trên lượt `user-query` cuối cùng: đáp án nằm **trước** tin vừa gửi thì **tuyệt đối không nhận**. Không xác định được vị trí thì không chặn (giữ hành vi cũ).
+  3. Đổi lại: thà timeout báo lỗi rõ còn hơn nộp đáp án câu trước — vì nộp sai sẽ kéo theo vòng sửa bài vô hạn.
+- **Sửa 2 — không bỏ qua lượt bot chỉ vì tin cuối là của mình:**
+  1. `findActiveQuestion()` bản cũ đặt `shouldScanChatTurn = false` khi tin cuối được phân loại là `user` → bỏ **toàn bộ** phần đọc lượt chat, rơi xuống các bộ quét dự phòng (`.markdown-body`, modal…) mà đề EduNext không nằm ở đó → trả `null` → **đứng im dù câu #2 đã hiện**.
+  2. Nay luôn đọc lượt assistant gần nhất; nếu `getCurrentTurnAssistantMessages()` rỗng thì lấy `getLatestAssistantMessage()` (`source: latest_assistant`). Không còn phụ thuộc vào việc đoán vai trò tin nhắn.
+  3. Khi thực sự không thấy đề, log nêu rõ **lý do + trạng thái** (số tin, vai trò tin cuối, 40 ký tự đầu của bot) mỗi 8 giây — lần sau không phải đoán.
+- **Test:** 35 + 37 = **72/72 PASS** (thêm 6 assert khoá: không còn `shouldScanChatTurn = false`, có `latest_assistant`, có `comesAfterLastUserTurn` và `waitForResponse` dùng nó, có `DOCUMENT_POSITION_FOLLOWING`, có log chẩn đoán).
+
+**3.4.1** — **Gửi ẢNH thật sang Gemini (có bằng chứng), không gửi chữ thay ảnh:**
+- **Lỗi thật tìm được:** sau khi ảnh đã đính kèm vào khung soạn thảo Gemini, hàm nhập đề `doInject()` chạy **sau** đó và **xoá sạch vùng soạn thảo** (`selectAll` + `delete` + `innerHTML=''`) để dọn chỗ. Chip ảnh đang chờ nằm trong vùng đó → bị xoá → tin nhắn gửi đi **chỉ còn chữ**, Gemini trả lời dựa vào phần text trích từ trang (tức là "đọc chữ" chứ không đọc ảnh).
+- **Sửa 3 lớp:**
+  1. `doInject()` **không bao giờ xoá** khi đang có ảnh chờ: chỉ xoá các **text node** và đặt con trỏ ở cuối, giữ nguyên chip ảnh.
+  2. **Trước khi bấm gửi:** nếu ảnh không còn trong khung soạn thảo → đính lại ngay (tối đa 5 giây). Có log số ảnh đang chờ.
+  3. **Sau khi gửi:** `sentUserTurnHasImage()` đọc chính lượt user vừa xuất hiện trong hội thoại. Nếu thiếu ảnh → đính lại và **gửi lại đúng 1 lượt** (circuit breaker), rồi xác nhận lại; vẫn thiếu thì báo lỗi rõ chứ không im lặng.
+- **Sửa thêm một lỗi chết luồng:** ô nhập phía Gemini khai báo `const input` nhưng bên dưới lại gán `input = altInput` khi lượt nhập đầu hụt — trong strict mode đây là **TypeError**, làm cả yêu cầu chết mà không có đáp án (xảy ra đúng lúc mạng lag). Đã đổi sang `let` + làm mới ô soạn thảo nếu React dựng lại trước khi gửi.
+- **Log mới để bạn kiểm chứng:** `Trước khi gửi: N ảnh ...` · `✅ Đã gửi kèm N ảnh (đã xác nhận trong tin nhắn)` · `⚠️ Tin nhắn vừa gửi KHÔNG kèm ảnh → đính lại và gửi lại 1 lượt`.
+- **Test:** 35 + 31 = **66/66 PASS** (thêm chốt chặn: `doInject` không xoá chip ảnh, có `sentUserTurnHasImage`, có đính lại trước/sau khi gửi, không còn gán vào `const`).
+
+**3.4.0** — **Model do người dùng chọn & đọc được câu #2 trở đi:**
+- **Bỏ hoàn toàn việc script tự chọn model Gemini (`ensureGeminiModel`):**
+  1. Trước đây script tự mở picker và ép model sang `3.1 Pro` (hoặc giá trị trong `EDUNEXT_GEMINI_MODEL`). Nay **không còn một cú click nào** vào UI chọn model — hàm chỉ **đọc** tên model đang dùng để hiện ở badge/log.
+  2. Lợi ích phụ: mỗi lần script đổi model, giao diện Gemini dựng lại → ô soạn thảo và ảnh đính kèm có thể bị xoá; bỏ đi thì việc đính ảnh/gửi đề ổn định hơn.
+  3. Không còn model mặc định trong code; mặc định được xoá khỏi `GEM_STATE.geminiModelPref`.
+- **Vì sao câu #1 xong nhưng câu #2 không đọc được (và câu #3, #4… cũng vậy):**
+  1. `findActiveQuestion()` phân loại lượt chat theo thứ tự: transition → **`isReadyPrompt`** → đề/feedback. `isReadyPrompt()` khớp cả **emoji** (💡🎯🚩🚀…) và các cụm **"tiếp theo / chào mừng / vào bài / khởi động / nhấn vào"**.
+  2. Nhận xét của giáo viên EduNext **luôn** có đúng những thứ đó → lượt chứa câu #2 bị gán `ready_prompt` → `checkForNewContent` `return` im lặng → không bao giờ đọc câu #2. Bấm "Giải lại" đi đường khác nên lại chạy được (giải thích vì sao bấm tay thì được).
+  3. *Sửa 2 lớp:* (a) sau khi handshake đóng, `isReadyPrompt` **không còn được gọi** để phân loại; (b) nếu vẫn có `ready_prompt` khi handshake đã xong thì `checkForNewContent` **coi đó là đề thật và xử lý tiếp** thay vì return.
+- **Lưới an toàn cuối (tự hồi, không cần bấm tay):** đang IDLE, >12 giây không nhận được câu hỏi mới, nhưng bot đã trả nội dung >80 ký tự → xoá `lastFeedbackFingerprint` + dấu "đã trả lời" trên element rồi quét lại sâu (tối đa 1 lần/10 giây). Dù phân loại sai kiểu gì thì script cũng tự đọc lại.
+- **Test:** `tests/handshake.test.mjs` 35 + `tests/stability.test.mjs` 23 = **58/58 PASS**, gồm chốt chặn mã nguồn: không còn `picker.click()`, không còn `'3.1 Pro'`, `isReadyPrompt` chỉ gọi khi handshake còn mở.
+
+**3.3.9** — **Tự động hoá dựa trên BẰNG CHỨNG (evidence-based FSM):**
+- **Lỗi "phải bấm gửi lại thì mới gửi":** `submitAnswer` trước đây bấm gửi **một lần** rồi tin tưởng. Nếu nút gửi còn `disabled` (React chưa nhận state) hoặc mạng lag, câu trả lời vẫn nằm trong ô soạn thảo nhưng FSM vẫn chuyển sang `EVALUATING` — tức script tưởng đã nộp. Nay:
+  1. `waitForSubmitProof()` chờ **bằng chứng thật**: có thêm một lượt NGƯỜI DÙNG trong khung chat, hoặc tổng số lượt tăng (khi phân loại vai trò hỏng), hoặc đúng nội dung đáp án đã xuất hiện.
+  2. Không có bằng chứng → **ép gửi lại tối đa 3 lượt** (tự điền lại nếu ô đã trống, không bao giờ bấm gửi khi ô rỗng), rồi thêm **2 vòng** nộp lại toàn bộ sau 4 giây.
+  3. Vẫn không được → dừng ở `PAUSED` kèm thông báo rõ, **không giả vờ đã nộp** để tránh nộp lặp/nộp sai trong im lặng.
+- **Lỗi "lúc đầu không đọc được, phải bấm Giải lại":** gốc rễ nằm ở cổng handshake. `handleHandshakeGate()` trả `waiting` khi chờ thẻ canvas, và `checkForNewContent()` **return ngay** với mọi kết quả khác `not_handshake` — nên React Fiber không cập nhật `turnCards` (canvas EduNext là signed URL chỉ hiện trong DOM) là **mọi lượt quét bị chặn vô hạn**. Nay:
+  1. `resolveHandshakeState()` tự đóng cổng (`done`) khi DOM đã là đề học thật — dùng `looksLikeAcademicQuestion()` + `calculateQuestionScore() ≥ 45`.
+  2. `checkForNewContent()` có thêm nhánh **cứu hộ**: cổng đang chờ nhưng lượt hiện tại đã là đề thật → đóng cổng và xử lý tiếp.
+  3. Không mở cổng sớm: thẻ Sẵn sàng (🚀 đỏ) vẫn bị chặn bởi Rocket-Signature Gate và bởi test hồi quy riêng.
+- **Lỗi "bấm Giải lại thì điền lại đáp án cũ của Gemini":**
+  1. Phía EduNext: `forceFreshAnswerUntil` (bật khi bấm Giải lại, khi vừa sai bài) buộc **lấy đáp án mới** và bỏ qua `bridgeRecentAnswers`.
+  2. Phía tab Gemini: cờ `forceNew` trước đây **chỉ** áp cho `bridgeCoreCache`; hai bộ đệm còn lại (`lastProcessedPrompt` 60s, `bridgeResponseCache` 180s) vẫn trả đáp án cũ. Nay `forceNew` chặn **toàn bộ** ba tầng đệm.
+- **Cơ chế an toàn (circuit breaker):** tối đa 3 lượt bấm gửi + 2 vòng nộp lại; không có vòng lặp vô hạn, không bao giờ gửi tin rỗng, và tổng số prompt gửi sang Gemini vẫn bị giới hạn bởi `MAX_RETRIES` + `bridgeCooldownUntil`.
+- **Test:** `tests/handshake.test.mjs` 35 assert + `tests/stability.test.mjs` 16 assert — **51/51 PASS** (thêm ca: fiber rỗng + DOM có đề thật ⇒ mở cổng; fiber rỗng + thẻ Sẵn sàng ⇒ vẫn chờ).
+
+**3.3.8** — **Chống đứng im sau khi trả lời đúng, vân tay câu hỏi chính xác, nhịp quét DOM tách riêng:**
+- **Vì sao script "dừng ở câu trả lời đó luôn":** dấu "đã trả lời" (`dataset.edunextAnswered`) gắn trên **element** của lượt chat. Bot EduNext nối câu hỏi kế tiếp vào **chính khung tin nhắn cũ** (React tái dùng node) → element vẫn mang dấu đã trả lời → mọi vòng quét đều bỏ qua, kể cả heartbeat. Bấm "Giải lại" xoá dấu nên chạy được một lần rồi kẹt lại.
+- **Vì sao câu hỏi đã hiện ra mà script không nhận:** `isSameQuestion()` cố tình khớp mờ (60 ký tự đầu) để phục vụ việc sửa bài; dùng nó cho quyết định "đã trả lời chưa" thì hai câu cùng dạng — chỉ khác số liệu — bị coi là một.
+- **Sửa gốc:** `buildQuestionIdentity()` (chuẩn hoá NFC, bỏ dấu câu, giữ nguyên chữ số và toàn văn) + `resolveAnsweredState()`:
+  1. Dấu trên DOM gắn kèm **vân tay câu hỏi** (`dataset.edunextAnsweredKey`). Khung tin nhắn cũ + nội dung mới ⇒ vân tay khác ⇒ **không** bị coi là đã trả lời, đồng thời dấu cũ được dọn.
+  2. `lastAnsweredQuestionText` / lịch sử câu đã đúng chỉ chặn khi **trùng khít** vân tay. Khớp mờ chỉ còn dùng đúng chỗ của nó (sửa bài, retry cùng câu).
+  3. Khi nhận INCORRECT, toàn bộ khoá "đã trả lời" được mở (kể cả `lastAnsweredKey`) — trước đây thiếu bước này nên một lần bóc tách trượt là kẹt vĩnh viễn.
+  4. Dấu sót từ thẻ Sẵn sàng / thông báo chuyển bài (không kèm vân tay) không còn khoá đề thật.
+- **Đáp án cũ bị dùng lại:** bộ nhớ đệm bridge so khớp mờ trong 4 phút nên trả đáp án của câu trước cho câu mới cùng dạng. Nay chỉ dùng lại khi đề **trùng khít**.
+- **Handshake kẹt "await_confirm":** thêm *cửa thoát chết* — đã gửi `Bắt đầu` >15 giây mà nội dung lượt chat đã là đề học thật (`looksLikeAcademicQuestion`) thì đóng handshake để giải tiếp, thay vì trả `ready_prompt` cho mọi lượt. Thẻ Sẵn sàng vẫn bị chặn riêng bởi Rocket-Signature Gate.
+- **Mượt hơn (hiệu năng):**
+  1. Toàn bộ phần **quét DOM nặng** (bóc câu hỏi + nút chuyển bài + kiểm tra hoàn thành bài) trước đây chạy mỗi **800 ms**, nay giãn ra **2.400 ms** (`CONFIG.IDLE_SCAN_MS`) — giảm 3× số lần quét toàn trang; phản ứng câu mới vẫn tức thì nhờ MutationObserver debounce.
+  2. `_0xINTEGRITY_GUARD.verify()` trước đây chạy theo **từng mutation** DOM (băm lại ~45 KB mã nguồn 6 hàm mỗi lần — đo được ≈0,1 ms/lần, tức 10–30 ms main-thread mỗi giây khi bot stream). Nay tối đa **1 lần / 3 giây**.
+  3. Badge "đang soạn" treo (spinner sót / mạng lag) không còn chặn vĩnh viễn: nội dung ổn định >2,5 giây và badge bật >8 giây thì script xử lý tiếp.
+  4. Sau khi trả lời đúng, script quét bổ sung ở 0,4 s / 1,5 s / 4 s để bắt câu kế tiếp ngay, không chờ nhịp quét.
+- **Chống spam tab Gemini khi mạng lag:** sau mỗi lượt bridge thất bại có thêm `bridgeCooldownUntil` (nghỉ 4–8 s cộng dồn) trước khi gửi prompt mới, tránh chồng prompt khi tab còn đang sinh câu trả lời. Gói tin cũ vẫn được gửi tín hiệu `cancel`.
+- **Test:** `tests/handshake.test.mjs` 35 assert + `tests/stability.test.mjs` 14 assert (đúng các ca: câu mới trong khung tin nhắn cũ, React render node mới, dấu sót không kèm vân tay, lịch sử CORRECT/INCORRECT) — **49/49 PASS**.
+
+**3.3.7** — **Handshake FSM 2 bước ("chào → Bắt đầu"), Canvas Ledger & Rocket-Signature Gate:**
+- **Cổng handshake 4 pha `greet → await_ready → await_confirm → done` (`handleHandshakeGate` / `resolveHandshakeState`):**
+  1. *Lý do:* bản 3.3.6 chỉ bỏ qua lượt 0, nên thẻ canvas "Bạn đã sẵn sàng chưa? 🚀" ở lượt 1 vẫn lọt vào `canvasUrls` và bị đẩy sang Gemini. Các bộ lọc theo URL (`rocket`, `ready`…) không bao giờ khớp vì canvas EduNext là signed URL Azure/MinIO.
+  2. *Bước 1 — chào:* chat trống thì gửi đúng một lời chào (`xin chào` / `hello` / `alo` / `hi` / `chào bạn`), 0 token.
+  3. *Bước 2 — xác nhận:* chỉ khi đã xác định được thẻ "Sẵn sàng" mới gửi **đúng chuỗi `Bắt đầu`** (trước đây là ngẫu nhiên `['ok','vào','Sẵn sàng']`, khiến FSM không phân biệt được handshake với câu trả lời thật).
+  4. *Chốt cứng:* `extractQuestionData` và `findActiveQuestion` trả `ready_prompt`/`null` cho tới khi `phase === 'done'` — ảnh thẻ Sẵn sàng không thể đi sang Gemini kể cả khi mọi tầng khác sai.
+- **Chữ ký 🚀 đỏ theo pixel (`isReadyCardImage` + `_detectRocketBand`):**
+  1. *Ground truth từ chính web:* cắt dải 16% chiều cao cuối ảnh, tìm cụm pixel đỏ nhỏ, gần vuông (tỷ lệ cạnh 0,55–1,9), mật độ ≥ 0,08. Đây là chữ ký emoji 🚀 trên dòng cuối thẻ chào.
+  2. *Chống dương tính giả:* chữ đỏ dẹt ("Lưu ý:"), gạch chân đỏ, mảng đỏ lớn (đồ thị, biểu đồ) đều bị loại — đã có test riêng cho từng ca.
+  3. *Cache theo vân tay trộn đầu + giữa + cuối chuỗi base64:* chỉ lấy đuôi thì các ảnh cùng codec dễ trùng marker EOI và cache nhầm ảnh đề thật thành thẻ Sẵn sàng.
+- **Canvas Ledger chống lẫn ảnh giữa các câu (`canvasConsumedBy`, `handshakeReadyUrls`):**
+  1. *Sổ cái theo câu:* mỗi URL canvas được ghi chủ sở hữu bằng vân tay đề (`buildQuestionKey`); câu khác không được tái dùng. Vẫn cho phép dùng lại khi retry cùng câu mà text lệch nhẹ (so khớp 30–60 ký tự đầu).
+  2. *Blacklist vĩnh viễn:* URL thẻ Sẵn sàng vào `handshakeReadyUrls` (giới hạn 60 phần tử) và bị loại ở **mọi** tầng: Fiber card, Network Interceptor, DOM canvas, Zoom modal.
+  3. *Card theo từng tin nhắn (`turnCards`):* thay vì gộp toàn lượt, chỉ lấy card CUỐI có `question_block` (Canvas #2) của lượt hiện tại — hết cảnh câu 3 vơ nhầm canvas câu 2.
+- **Chống treo (`await_confirm` watchdog + lá chắn cuối):**
+  1. *Nhắc lại có kiểm soát:* sau 45 giây không thấy đề thì gửi lại `Bắt đầu`, tối đa 3 lần; quá 2 phút thì mở khoá FSM về `greet` để script không chết đứng.
+  2. *Không mở cổng sớm:* khi fiber chưa kịp render tin vừa gửi mà lượt chỉ còn thẻ Sẵn sàng đã blacklist, FSM vẫn giữ `await_confirm` thay vì nhảy `done`.
+  3. *Lá chắn trong `runSolving`:* nếu ảnh đề đầu tiên vẫn mang chữ ký 🚀 đỏ (fiber thất bại hoàn toàn) thì huỷ giải và gửi `Bắt đầu`; chỉ áp dụng khi chưa xác nhận lần nào và chưa giải câu nào, nên không ảnh hưởng đề Vật lý có tên lửa thật.
+  4. *Reset sạch khi đổi bài / bật lại Auto:* `resetHandshakeState()` xoá FSM, blacklist, ledger và cache chữ ký.
+- **Bộ test hồi quy `tests/handshake.test.mjs`:** 35 assert, trích nguyên văn khối phương thức từ userscript nên không bị lệch logic; chạy `node tests/handshake.test.mjs` (35 PASS / 0 FAIL ở bản này).
 
 **3.3.6** — **React Fiber Ground Truth, Canvas #2 Active Lock & Anti-Freeze FSM Unlocking:**
 - **Khóa mục tiêu Canvas #2 & Cách ly thẻ chào mừng Turn 0 (Canvas #2 Active Lock & Welcome Banner Filter):**
