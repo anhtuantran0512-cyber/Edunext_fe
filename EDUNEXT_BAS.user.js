@@ -85,10 +85,10 @@
   /* [BroAmStuck Studio - Lớp 3: Dynamic Polymorphic Decryption Engine] */
   const _0xkey = "BroAmStuck_Studio_Edunext_Bas_Protected_Core_2026_SecureKey";
   const _0xseed = 90;
-  const _0xexpected_hash = "3d24801ae6b3da062fb2a5bd76a7e03ed8e0a15c2361ef99052f8fb5aef30977";
+  const _0xexpected_hash = "d61fdb014453ab8b3f020251617e11b409f124204b338b654d04ff72a43a6260";
 
   const _0xpayload_parts = [
-    "Nz87gpahsKSbhLGKsEBZRXRFMAR/NS/H0/XU6IKihaemKVGA7X4dOQF071dO4aBNS6jy0MgwLxgt",
+    "Nz87gpahsKSbhLGKsEBZRXRFMAR/NS/H0/nU64Sih6ykKVGA7X4dOQF071dO4aBNS6jy0MgwLxgt",
     "endaRzzrz8P864KYuYa8SlZIe1Q7CRU5L8HY/NTki7Cyo6tSRnMGN0ZqRi9jnuqtorPCtI2oo0JY",
     "fEdmDycqIAPc9+/7npulnq9+RVhnVzoWFDouxtn/1euKs7OkqkxKQWVhHzEePzXf9q6jtMO3jLei",
     "QVl7RmUOKCsjAtv27PrhmruIukhUTnVWORcTOy3Hxv7W6o2ysKWlTX5ddX1kSUlNTruYst/JoqtQ",
