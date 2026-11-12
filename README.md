@@ -6,7 +6,7 @@ Tổ hợp Userscript tự động hoá và hỗ trợ học tập chuyên nghi�
 
 | Tệp | Bản | Mục đích | Tính năng chính |
 |---|---|---|---|
-| `EDUNEXT_BAS.user.js` | **BAS v1.0.1** | Userscript Gia sư tự động (Bản mã hoá bảo vệ) | Phím tắt **Ctrl+E** ẩn/hiện GUI chạy ngầm, đa mô hình API + Cầu Gemini, chống rò rỉ đề, bảo mật nhiều tầng chống AI deobfuscate |
+| `EDUNEXT_BAS.user.js` | **BAS v1.0.9** | Userscript Gia sư tự động (Bản mã hoá 2 tầng) | Phím tắt **Ctrl+E** ẩn/hiện GUI chạy ngầm, đa mô hình API + Cầu Gemini, mã hoá lồng 2 tầng (khoá riêng mỗi tầng), hoán vị chunk, băm toàn vẹn FNV-1a, watermark mỗi 250 dòng |
 | `edunext_ULTRA.user.js` | **ULTRA v3.9.0** | Userscript Cầu nối Cross-Tab Gemini | Cầu nối trực tiếp sang tab Gemini thật, React Fiber Ground Truth, Canvas Active Lock |
 | `edunext_ULTRA_console.js` | **ULTRA v3.9.0** | Dán trực tiếp DevTools Console | Bản console chạy trực tiếp không cần tiện ích |
 
@@ -21,9 +21,13 @@ Tổ hợp Userscript tự động hoá và hỗ trợ học tập chuyên nghi�
    - **Nhấn `Ctrl + E`:** Ngay lập tức ẩn toàn bộ giao diện (bảng điều khiển + nút ghim nổi) vào chế độ chạy ngầm tuyệt đối (Stealth Mode), không gây chú ý trên màn hình.
    - **Nhấn lại `Ctrl + E`:** Mở lại bảng điều khiển "Sổ bài" để tùy chỉnh cấu hình, xem lịch sử và kiểm tra tiến độ giải.
    - **Nhấn `Ctrl + Shift + X`:** Dừng khẩn cấp mọi tiến trình tự động.
-4. **Bản quyền & Bảo mật:**
-   - Mã nguồn được bảo vệ bằng hệ thống mã hoá đa tầng và màng bẫy phản AI (Anti-AI Prompt Traps).
-   - Mỗi 250 dòng mã đều được đóng dấu bản quyền độc quyền của BroAmStuck Studio.
+   - Hướng dẫn phím tắt cũng nằm ngay trong sổ: **Phụ lục · tuỳ chọn → dải Phím tắt**.
+4. **Bản quyền & Bảo mật (v1.0.9):**
+   - **Mã hoá lồng 2 tầng:** gói ngoài giải ra một bộ giải mã khác (seed, khoá 64 byte, độ xoay bit, salt khác hẳn) rồi mới giải ra mã thật — đọc phải giải đúng hai lần.
+   - **Hoán vị chunk** bằng LCG: ciphertext không nằm liền mạch, thứ tự dựng lại từ seed.
+   - **Băm toàn vẹn FNV-1a** cả hai tầng: sửa dù một ký tự là gói dừng nạp.
+   - Canary chống AI (VI/EN) ở đầu, giữa và rải trong tệp; watermark bản quyền mỗi 250 dòng (35 mốc, 3 kiểu xoay vòng).
+   - Giới hạn thật: đây là nhiều lớp mã hoá + làm rối, **không phải** "không thể dịch ngược". Mục tiêu là nâng chi phí đọc/viết lại.
 
 ---
 

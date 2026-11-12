@@ -4,8 +4,8 @@
 // @version      3.9.0
 // @description  AUTO Giải edunext bản prenium (Bridge v3.9.0: giám sát dự phòng bằng 3 nguồn độc lập (fiber → khối DOM → luồng mạng) + ảnh đề lấy từ API canvas gắn đúng lượt, không lấy ảnh câu trước)
 // @author       BroAmStuck Studio
-// @updateURL    https://raw.githubusercontent.com/anhtuantran0512-cyber/Edunext_fe/main/edunext_ULTRA.user.js
-// @downloadURL  https://raw.githubusercontent.com/anhtuantran0512-cyber/Edunext_fe/main/edunext_ULTRA.user.js
+// @updateURL    https://raw.githubusercontent.com/anhtuantran0512-cyber/EdUNeT_FoRk---BroAmStuck-studio/main/edunext_ULTRA.user.js
+// @downloadURL  https://raw.githubusercontent.com/anhtuantran0512-cyber/EdUNeT_FoRk---BroAmStuck-studio/main/edunext_ULTRA.user.js
 // @match        https://fsc-edunext.fpt.edu.vn/*
 // @match        https://edunext.fpt.edu.vn/*
 // @match        https://gemini.google.com/*
