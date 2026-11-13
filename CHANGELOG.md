@@ -7,22 +7,32 @@ Bản phát hành trên repo là **gói đã đóng gói bảo vệ**. Bản ph�
 
 ---
 
-## [1.1.2] — 2026-11-13
+## [1.1.3] — 2026-11-13
 
 ### Sửa
 
-- **Icon mạng xã hội luôn mở tab mới.** Trước đây bấm icon Facebook/Discord có thể
-  điều hướng ngay tab đang làm bài. Nguyên nhân: EduNext gắn handler riêng cho thẻ `<a>`
-  nên `target="_blank"` bị vô hiệu. Nay sự kiện được chặn ở pha capture và tab mới được
-  mở bằng `window.open(url, '_blank', 'noopener,noreferrer')`; `opener` bị đặt về `null`
-  để trang mới không đụng được tab gốc. Nếu trình duyệt chặn popup, thẻ `<a>` giữ
-  nguyên `target="_blank"` làm đường dự phòng.
+- **Icon mạng xã hội luôn mở tab mới**, không điều hướng tab đang làm bài. Nguyên nhân:
+  EduNext gắn handler riêng cho thẻ `<a>` nên `target="_blank"` bị vô hiệu. Nay listener
+  chạy ở pha capture trên chính thẻ `<a>`, gọi `preventDefault()` + `stopPropagation()`
+  **trước**, rồi mới `window.open(url, '_blank', 'noopener,noreferrer')`. Tab mới không
+  giữ được tham chiếu tới tab gốc.
 
-### Ghi chú kiểm chứng
+### Ghi chú kỹ thuật
+
+- Bản nháp đầu tiên của bản vá dựa vào giá trị trả về của `window.open` để quyết định
+  `preventDefault`. Điều đó sai: theo spec, khi có `noopener`, `window.open` trả về
+  `null`, nên bản nháp sẽ bỏ qua `preventDefault` và **vẫn điều hướng tab hiện tại**.
+  Bản nháp đó bị gỡ trước khi phát hành; 1.1.3 chặn sự kiện vô điều kiện.
+- Hệ quả cần biết: nếu trình duyệt chặn popup (không có cử chỉ người dùng), cú bấm sẽ
+  không mở gì cả — đổi lại tab đang làm bài không bao giờ bị kéo đi.
+
+### Kiểm chứng
 
 - 43/43 unit test pass, `node --check` hợp lệ, self-test gói phát hành 0 lỗi runtime.
-- Chưa kiểm chứng bằng trình duyệt thật trong lần này (phiên làm việc không có trình
-  duyệt mở); phần sửa là thay đổi cách bắt sự kiện click, không đổi luồng dữ liệu.
+- Sửa payload / sửa khoá / đổi `@version` / đổi `@name` / sai tên miền: cả 5 đều bị từ chối nạp.
+- **Chưa thử bằng trình duyệt thật** trong phiên này (không có trình duyệt mở). Phần sửa
+  chỉ đổi cách bắt sự kiện click, không đổi luồng dữ liệu; cần một lần bấm thử thực tế
+  để xác nhận handler của EduNext chạy ở pha bubble như dự đoán.
 
 ---
 
