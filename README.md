@@ -11,7 +11,7 @@ Repo này chỉ chứa **bản phát hành đã đóng gói bảo vệ**. Mã ng
 | `SHA256SUMS.txt` | Mã băm SHA-256 của hai tệp trên | — |
 | `edunext_ULTRA.user.js` | Sản phẩm khác trong cùng nhóm: cầu nối cross-tab sang tab Gemini thật | — |
 
-Phiên bản hiện tại: **1.1.2** (13/11/2026).
+Phiên bản hiện tại: **1.1.3** (13/11/2026).
 
 ---
 
@@ -194,7 +194,7 @@ Repo cố ý **không** chứa: mã nguồn gốc, bản build chạy thử, log
 
 ## 8. Lịch sử phiên bản
 
-Xem [CHANGELOG.md](CHANGELOG.md). Bản mới nhất: **1.1.2** — sửa icon mạng xã hội để luôn mở tab mới thay vì điều hướng tab đang làm bài.
+Xem [CHANGELOG.md](CHANGELOG.md). Bản mới nhất: **1.1.3** — sửa icon mạng xã hội để luôn mở tab mới thay vì điều hướng tab đang làm bài.
 
 ---
 
