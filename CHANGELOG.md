@@ -7,6 +7,25 @@ Bản phát hành trên repo là **gói đã đóng gói bảo vệ**. Bản ph�
 
 ---
 
+## [1.1.2] — 2026-11-13
+
+### Sửa
+
+- **Icon mạng xã hội luôn mở tab mới.** Trước đây bấm icon Facebook/Discord có thể
+  điều hướng ngay tab đang làm bài. Nguyên nhân: EduNext gắn handler riêng cho thẻ `<a>`
+  nên `target="_blank"` bị vô hiệu. Nay sự kiện được chặn ở pha capture và tab mới được
+  mở bằng `window.open(url, '_blank', 'noopener,noreferrer')`; `opener` bị đặt về `null`
+  để trang mới không đụng được tab gốc. Nếu trình duyệt chặn popup, thẻ `<a>` giữ
+  nguyên `target="_blank"` làm đường dự phòng.
+
+### Ghi chú kiểm chứng
+
+- 43/43 unit test pass, `node --check` hợp lệ, self-test gói phát hành 0 lỗi runtime.
+- Chưa kiểm chứng bằng trình duyệt thật trong lần này (phiên làm việc không có trình
+  duyệt mở); phần sửa là thay đổi cách bắt sự kiện click, không đổi luồng dữ liệu.
+
+---
+
 ## [1.1.1] — 2026-11-13
 
 ### Thêm
