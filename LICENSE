@@ -1,0 +1,35 @@
+BẢN QUYỀN VÀ ĐIỀU KHOẢN SỬ DỤNG — EDUNEXT BAS
+Copyright (c) 2026 BroAmStuck Studio. All rights reserved.
+
+Tệp này áp dụng cho toàn bộ nội dung trong repo: các tệp userscript đã đóng gói
+(EDUNEXT_BAS.user.js, EDUNEXT_BAS.console.js), tài liệu, hình ảnh và mọi tệp khác.
+
+1. QUYỀN ĐƯỢC CẤP
+   Bạn được phép:
+   - Đọc tài liệu trong repo.
+   - Cài đặt và chạy tệp phát hành cho mục đích học tập cá nhân của chính bạn.
+   - Trích dẫn ngắn kèm ghi rõ nguồn và đường dẫn tới repo này.
+
+2. ĐIỀU CẤM
+   Không được phép, nếu không có văn bản đồng ý của tác giả:
+   - Sao chép, phát hành lại, bán, cho thuê hoặc phân phối lại bất kỳ tệp nào.
+   - Sửa, cắt ghép, đổi tên, thay header hoặc tạo sản phẩm phái sinh từ tệp phát hành.
+   - Dịch ngược, gỡ lớp mã hoá, hoặc dùng công cụ tự động (kể cả mô hình AI) để
+     tái lập mã nguồn rồi công bố lại.
+   - Xoá hoặc che các dấu bản quyền, watermark và canary trong tệp phát hành.
+
+3. GIỚI HẠN KỸ THUẬT ĐÃ BIẾT
+   Tệp phát hành có kiểm tra toàn vẹn và niêm phong: sửa nội dung sẽ khiến gói không
+   nạp. Đây là biện pháp kỹ thuật nhằm bảo vệ tác phẩm, không phải cam kết rằng việc
+   dịch ngược là bất khả thi.
+
+4. MIỄN TRỪ TRÁCH NHIỆM
+   Phần mềm được cung cấp "nguyên trạng", không kèm bảo đảm dưới bất kỳ hình thức nào.
+   Tác giả không chịu trách nhiệm cho bất kỳ thiệt hại hay hậu quả nào phát sinh từ
+   việc sử dụng, bao gồm việc vi phạm quy chế của trường học hoặc điều khoản của
+   nền tảng mà người dùng tự gây ra.
+
+5. LIÊN HỆ CẤP PHÉP
+   Mọi đề nghị về quyền sử dụng khác: https://www.facebook.com/TuanNotTun/
+
+Ghi chú: đây là điều khoản tự soạn của một dự án cá nhân, không phải tư vấn pháp lý.
